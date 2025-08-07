@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 import os
@@ -6,31 +6,45 @@ import os
 app = FastAPI()
 
 static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-print("Static dosya yolu:", static_dir, flush=True)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 @app.get("/")
 def root():
     return FileResponse(os.path.join(static_dir, "index.html"))
 
-# --- ÖRNEK: Basit in-memory veri saklama ---
+# Sağlık kontrolü için endpoint
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+# Bellekte dosya kayıtlarını tutmak için (örnek/demo amaçlı)
 FILES = []
 
 @app.post("/upload-analyze")
-async def upload_analyze(file: UploadFile = File(...)):
-    # Basit dosya kaydetme ve veri analizi simülasyonu
-    content = await file.read()
-    # Sadece isim, boyut ve dummy verisi
-    info = {
-        "filename": file.filename,
-        "size": len(content),
-        "total": 123.45,     # Demo: Gerçek KDV/Toplam yok, örnek değer!
-        "vat": 23.45,
-        "date": "2025-08-07",
-        "vendor": "DEMO VENDOR"
+async def upload_analyze(files: list[UploadFile] = File(...)):
+    results = []
+    for file in files:
+        content = await file.read()
+        info = {
+            "filename": file.filename,
+            "status": "success",
+            "file_type": file.content_type,
+            "file_size": len(content),
+            "text_length": len(content),
+            "blob_url": "",  # Demo amaçlı boş
+            "extracted_text": content.decode(errors="ignore")[:200],  # Sadece ilk 200 karakteri tutuyoruz
+            "total_amount": 123.45,     # Demo
+            "vat_amount": 23.45,
+            "vendor_name": "DEMO VENDOR"
+        }
+        FILES.append(info)
+        results.append(info)
+    return {
+        "message": f"{len(results)} dosya işlendi.",
+        "results": results,
+        "processed_count": len(results),
+        "error_count": 0
     }
-    FILES.append(info)
-    return {"message": "Yüklendi", "result": info}
 
 @app.get("/records")
 def records():
