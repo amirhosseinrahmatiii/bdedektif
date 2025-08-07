@@ -10,7 +10,6 @@ RUN apt-get update && \
 COPY requirements.txt /app/
 WORKDIR /app
 RUN pip install --upgrade pip && pip install -r requirements.txt
-
 COPY . /app
 
 CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "main:app"]
