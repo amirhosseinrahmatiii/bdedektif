@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <title>BelgeDedektif</title>
+</head>
+<body>
+  <h1>BelgeDedektif’e Hoşgeldiniz!</h1>
+  <form action="/upload-analyze" method="post" enctype="multipart/form-data">
+    <input type="file" name="files" multiple>
+    <button type="submit">Yükle & Analiz Et</button>
+  </form>
+</body>
+</html>
