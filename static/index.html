@@ -2,119 +2,184 @@
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <title>Belge Dedektif</title>
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>BelgeDedektif</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { background: #f7f7fa; }
-        .thumb { max-width: 80px; max-height: 80px; }
-        .table td, .table th { vertical-align: middle; }
-        .summary-box { background: #fff3cd; border-radius:8px; padding:20px; margin-bottom:20px; }
+        body { background: #f8f9fa; }
+        .container { max-width: 900px; margin-top: 40px; }
+        .table { background: #fff; }
+        .ai-answer { white-space: pre-line; background: #f1f1f1; border-radius: 6px; padding: 8px; }
     </style>
 </head>
 <body>
-<div class="container my-4">
-    <h2 class="mb-4">BelgeDedektif’e Hoşgeldiniz!</h2>
-
-    <!-- Dosya Yükleme Formu -->
-    <form id="uploadForm" enctype="multipart/form-data" class="mb-4">
-        <div class="input-group">
-            <input type="file" id="files" name="files" multiple class="form-control" accept=".pdf,.docx,.txt,.jpg,.jpeg,.png" required>
-            <button type="submit" class="btn btn-primary">Yükle & Analiz Et</button>
-        </div>
-    </form>
-    <div id="uploadResult"></div>
-
-    <!-- Özet Kutu -->
-    <div id="summary" class="summary-box">
-        <b>Yüklenen Belge Sayısı:</b> <span id="count">0</span> |
-        <b>KDV Toplamı:</b> <span id="kdv_total">-</span> |
-        <b>Toplam Tutar:</b> <span id="sum_total">-</span> |
-        <b>En Çok Fiş Kesilen Firma:</b> <span id="top_firma">-</span>
+<div class="container shadow rounded p-4">
+    <h2 class="mb-4 fw-bold text-primary">BelgeDedektif’e Hoşgeldiniz!</h2>
+    <div class="mb-3">
+        <form id="uploadForm" enctype="multipart/form-data">
+            <input type="file" id="files" name="files" multiple accept=".pdf,.docx,.txt,.jpg,.jpeg,.png" class="form-control" required>
+            <button type="submit" class="btn btn-success mt-2">Yükle & Analiz Et</button>
+        </form>
+        <div id="uploadResult" class="mt-2"></div>
     </div>
 
-    <!-- Son Yüklenen Belgeler Tablosu -->
-    <div class="table-responsive">
-        <table class="table table-bordered align-middle" id="docsTable">
-            <thead class="table-light">
-                <tr>
-                    <th>Görsel</th>
-                    <th>Dosya</th>
-                    <th>Tarih</th>
-                    <th>KDV</th>
-                    <th>Toplam</th>
-                    <th>İşlem</th>
-                </tr>
-            </thead>
-            <tbody id="docsBody">
-            <!-- JS ile doldurulacak -->
-            </tbody>
-        </table>
-    </div>
+    <div id="summary" class="mb-4"></div>
+
+    <h4 class="mt-4">Son Yüklenen Belgeler</h4>
+    <table class="table table-bordered align-middle mt-2">
+        <thead>
+        <tr class="table-light">
+            <th>Dosya</th>
+            <th>Tarih</th>
+            <th>KDV</th>
+            <th>Toplam</th>
+            <th>Firma/Kişi</th>
+            <th>İşlem</th>
+        </tr>
+        </thead>
+        <tbody id="recordsTable"></tbody>
+    </table>
 </div>
-<script>
-// --- Dosya yükle ---
-document.getElementById('uploadForm').onsubmit = async function(e) {
-    e.preventDefault();
-    const form = e.target;
-    const data = new FormData(form);
-    document.getElementById('uploadResult').innerHTML = "Yükleniyor...";
-    const r = await fetch('/upload-analyze', {method:'POST', body:data});
-    const res = await r.json();
-    if (res && res.results) {
-        document.getElementById('uploadResult').innerHTML = "Yükleme başarılı!";
-        updateTable(res.results, true);
-    } else {
-        document.getElementById('uploadResult').innerHTML = "Hata: " + (res.error || "Bilinmeyen hata");
-    }
-};
 
-// --- Tabloyu güncelle ---
-let allDocs = [];
-function updateTable(newDocs, append=false) {
-    if (!append) allDocs = [];
-    allDocs = allDocs.concat(newDocs);
-    const tbody = document.getElementById('docsBody');
-    tbody.innerHTML = "";
-    let kdv_total = 0, sum_total = 0, top_firmas = {}, maxFirma = "-";
-    for (const doc of allDocs) {
-        // Basit KDV ve Toplam bulucu (demo)
-        let kdv = doc.kdv || "-", toplam = doc.toplam || "-";
-        // (Yapay zeka/analiz ile doldurulacak)
-        // Firma ismi demo
-        let firma = doc.firma || "-";
-        if (firma != "-") {
-            top_firmas[firma] = (top_firmas[firma] || 0) + 1;
-            if (top_firmas[firma] > (top_firmas[maxFirma]||0)) maxFirma = firma;
-        }
-        // Thumbnail ekle
-        let thumb = doc.blob_url && doc.file_type.match(/(jpg|jpeg|png)/i)
-            ? `<img src="${doc.blob_url}" class="thumb">`
-            : "-";
-        tbody.innerHTML += `<tr>
-            <td>${thumb}</td>
-            <td>${doc.filename}</td>
-            <td>${doc.upload_timestamp || "-"}</td>
-            <td>${kdv}</td>
-            <td>${toplam}</td>
+<!-- Modal: Soru Sor -->
+<div class="modal fade" id="askModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="askForm">
+        <div class="modal-header">
+          <h5 class="modal-title">AI'ya Soru Sor</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="askFilename">
+          <label>Sorunuz:</label>
+          <textarea class="form-control" id="askQuestion" rows="2" required></textarea>
+          <div class="ai-answer mt-3" id="aiAnswer" style="display:none"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-primary">Sor</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Güncelle -->
+<div class="modal fade" id="updateModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="updateForm" enctype="multipart/form-data">
+        <div class="modal-header">
+          <h5 class="modal-title">Dosya Güncelle</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="updateId">
+          <label>Yeni Dosya Seçin:</label>
+          <input type="file" id="updateFile" name="file" class="form-control" accept=".pdf,.docx,.txt,.jpg,.jpeg,.png" required>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-primary">Güncelle</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+async function fetchSummary() {
+    const r = await fetch('/summary');
+    const d = await r.json();
+    document.getElementById('summary').innerHTML = `
+      <div class="alert alert-info">
+        <b>Bu Ayın Özeti:</b><br>
+        Toplam Fiş/Fatura Tutarı: <b>${d.total_sum_month.toFixed(2)}₺</b> <br>
+        Toplam KDV: <b>${d.total_vat_month.toFixed(2)}₺</b> <br>
+        <span style="font-size:13px;">En Çok Fiş Kesilen Kişiler/Firmalar: ${d.top_vendors_month.map(v=>`${v.vendor} (${v.count})`).join(', ')}</span>
+      </div>
+    `;
+}
+async function fetchRecords() {
+    const r = await fetch('/records');
+    const d = await r.json();
+    const tb = document.getElementById('recordsTable');
+    tb.innerHTML = '';
+    d.records.forEach(rec => {
+        tb.innerHTML += `
+        <tr>
+            <td>${rec.file_name}</td>
+            <td>${rec.uploaded_at || ''}</td>
+            <td>${rec.vat_amount?.toFixed(2) || '0'}</td>
+            <td>${rec.total_amount?.toFixed(2) || '0'}</td>
+            <td>${rec.vendor_name || ''}</td>
             <td>
-                ${doc.blob_url ? `<a href="${doc.blob_url}" target="_blank">Görüntüle</a> | ` : ""}
-                <a href="#" onclick="deleteDoc('${doc.filename}');return false;">Sil</a> | 
-                <a href="#" onclick="askAI('${doc.filename}');return false;">Soru Sor</a>
+                <a href="${rec.blob_url || '#'}" target="_blank" class="btn btn-sm btn-outline-secondary">İndir</a>
+                <button class="btn btn-sm btn-outline-primary" onclick="openAskModal('${rec.file_name}')">Soru Sor</button>
+                <button class="btn btn-sm btn-outline-warning" onclick="openUpdateModal(${rec.id})">Güncelle</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteRecord(${rec.id})">Sil</button>
             </td>
         </tr>`;
-    }
-    document.getElementById('count').innerText = allDocs.length;
-    document.getElementById('kdv_total').innerText = kdv_total || "-";
-    document.getElementById('sum_total').innerText = sum_total || "-";
-    document.getElementById('top_firma').innerText = maxFirma;
+    });
 }
-// Demo: Sayfa açılır açılmaz API'den tüm belgeleri çekmek
-window.onload = async function() {
-    // Şu anlık backend'de kayıt yok, yükleme sonrası tablo dolacak.
+document.getElementById('uploadForm').onsubmit = async function(e) {
+    e.preventDefault();
+    const fd = new FormData(this);
+    document.getElementById('uploadResult').textContent = 'Yükleniyor...';
+    const r = await fetch('/upload-analyze', {method: 'POST', body: fd});
+    const d = await r.json();
+    document.getElementById('uploadResult').textContent = d.message || '';
+    await fetchSummary();
+    await fetchRecords();
 };
-function deleteDoc(filename) { alert('Silme fonksiyonu (API güncellemesi gerekir)'); }
-function askAI(filename) { alert('AI Fonksiyonu (API güncellemesi gerekir)'); }
+async function deleteRecord(id) {
+    if(!confirm("Silmek istediğinize emin misiniz?")) return;
+    await fetch('/delete?id='+id, {method:'DELETE'});
+    await fetchSummary();
+    await fetchRecords();
+}
+function openAskModal(filename) {
+    document.getElementById('askFilename').value = filename;
+    document.getElementById('askQuestion').value = '';
+    document.getElementById('aiAnswer').style.display = 'none';
+    var askModal = new bootstrap.Modal(document.getElementById('askModal'));
+    askModal.show();
+}
+document.getElementById('askForm').onsubmit = async function(e) {
+    e.preventDefault();
+    const filename = document.getElementById('askFilename').value;
+    const question = document.getElementById('askQuestion').value;
+    document.getElementById('aiAnswer').textContent = 'Yanıtlanıyor...';
+    document.getElementById('aiAnswer').style.display = 'block';
+    const r = await fetch('/ask', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({filename, question})
+    });
+    const d = await r.json();
+    document.getElementById('aiAnswer').textContent = d.answer || d.error || 'Yanıt alınamadı';
+};
+function openUpdateModal(id) {
+    document.getElementById('updateId').value = id;
+    document.getElementById('updateFile').value = '';
+    var updateModal = new bootstrap.Modal(document.getElementById('updateModal'));
+    updateModal.show();
+}
+document.getElementById('updateForm').onsubmit = async function(e) {
+    e.preventDefault();
+    const id = document.getElementById('updateId').value;
+    const fd = new FormData();
+    fd.append('file', document.getElementById('updateFile').files[0]);
+    await fetch('/update?id='+id, {method:'POST', body:fd});
+    var updateModal = bootstrap.Modal.getInstance(document.getElementById('updateModal'));
+    updateModal.hide();
+    await fetchSummary();
+    await fetchRecords();
+};
+window.onload = async () => {
+    await fetchSummary();
+    await fetchRecords();
+};
 </script>
 </body>
 </html>
