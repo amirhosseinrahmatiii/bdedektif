@@ -9,15 +9,12 @@ RUN apt-get update && \
     ACCEPT_EULA=Y apt-get install -y msodbcsql18
 
 # Gereken Python paketleri
-COPY requirements.txt /app/
-WORKDIR /app
+WORKDIR /home/site/wwwroot
+COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
 # Tüm uygulamayı kopyala
-COPY . /app
-
-# PYTHONPATH'i ayarla ki Python modülleri bulabilsin
-ENV PYTHONPATH=/app
+COPY . .
 
 # Başlatıcı komut
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:${PORT:-8000}", "main:app"]
+CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "main:app"]
