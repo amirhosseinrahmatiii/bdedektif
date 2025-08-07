@@ -1,76 +1,70 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-  <meta charset="UTF-8">
-  <title>BelgeDedektif | Fatura Yükle & Analiz Et</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <style>
-    body { background: #f4f7fb; }
-    .container { max-width: 900px; margin-top: 40px; }
-    .table th, .table td { vertical-align: middle; }
-  </style>
+    <meta charset="UTF-8">
+    <title>Belge Dedektif | Fatura/Fiş Analiz</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
-<body>
-  <div class="container">
-    <h2 class="text-primary text-center mb-4"><b>BelgeDedektif’e Hoşgeldiniz!</b></h2>
-    <form id="uploadForm" class="input-group mb-3" enctype="multipart/form-data">
-      <input type="file" class="form-control" name="file" id="fileInput" required>
-      <button class="btn btn-success" type="submit">Yükle & Analiz Et</button>
+<body class="bg-light">
+<div class="container my-5">
+    <h2>Belge Dedektif – Fatura/Fiş Analiz Platformu</h2>
+    <form id="uploadForm" class="my-4">
+        <div class="mb-3">
+            <input type="file" class="form-control" id="fileInput" required>
+        </div>
+        <button type="submit" class="btn btn-primary">Yükle &amp; Analiz Et</button>
     </form>
-    <div id="uploadStatus"></div>
-    <div class="card mt-4">
-      <div class="card-header"><b>Son Yüklenen Belgeler</b></div>
-      <div class="table-responsive">
-        <table class="table table-striped table-bordered table-hover">
-          <thead class="table-light">
-            <tr>
-              <th>Dosya</th><th>Tarih</th><th>KDV</th><th>Toplam</th><th>Firma/Kişi</th><th>İşlem</th>
-            </tr>
-          </thead>
-          <tbody id="recordsTable">
-            <!-- Satırlar buraya dinamik gelir -->
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-  <script>
-    function fetchRecords() {
-      fetch('/records').then(r=>r.json()).then(data=>{
-        const table = document.getElementById('recordsTable');
-        table.innerHTML = "";
-        data.records.forEach(rec=>{
-          table.innerHTML += `
-            <tr>
-              <td>${rec.filename}</td>
-              <td>${rec.date||''}</td>
-              <td>${rec.vat||''}</td>
-              <td>${rec.total||''}</td>
-              <td>${rec.vendor||''}</td>
-              <td></td>
-            </tr>
-          `;
-        });
-      });
+    <div id="result" class="my-3"></div>
+    <h4 class="mt-4">Yüklenen Belgeler</h4>
+    <table class="table" id="recordTable"><thead>
+        <tr><th>Ad</th><th>Tarih</th><th>Firma</th><th>KDV</th><th>Toplam</th><th>AI Soru</th></tr>
+    </thead><tbody></tbody></table>
+</div>
+<script>
+document.getElementById("uploadForm").onsubmit = async function(e){
+    e.preventDefault();
+    let file = document.getElementById("fileInput").files[0];
+    if(!file) return alert("Dosya seçiniz.");
+    let form = new FormData();
+    form.append("file", file);
+    let r = await fetch("/upload-analyze", {method: "POST", body: form});
+    let res = await r.json();
+    document.getElementById("result").innerHTML = "<b>" + res.message + "</b><br>" + (res.extracted_text||"");
+    loadRecords();
+};
+
+async function loadRecords(){
+    let t = document.querySelector("#recordTable tbody");
+    t.innerHTML = "";
+    let r = await fetch("/records");
+    let js = await r.json();
+    for(let row of js.records){
+        let tr = document.createElement("tr");
+        tr.innerHTML = `<td>${row.filename}</td>
+            <td>${row.uploaded_at.split("T")[0]}</td>
+            <td>${row.vendor_name||""}</td>
+            <td>${row.vat_amount||""}</td>
+            <td>${row.total_amount||""}</td>
+            <td>
+                <input class="form-control form-control-sm mb-1" type="text" placeholder="Bir soru yaz" id="q_${row.id}">
+                <button class="btn btn-outline-secondary btn-sm" onclick="askAI(${row.id})">Sor</button>
+                <div id="a_${row.id}" class="small mt-1"></div>
+            </td>`;
+        t.appendChild(tr);
     }
-    document.getElementById("uploadForm").onsubmit = function(e) {
-      e.preventDefault();
-      const fileInput = document.getElementById("fileInput");
-      const file = fileInput.files[0];
-      if (!file) return;
-      const formData = new FormData();
-      formData.append("file", file);
-      fetch('/upload-analyze', {
-        method: "POST", body: formData
-      }).then(r=>r.json()).then(data=>{
-        document.getElementById("uploadStatus").innerHTML = "<span class='text-success'>Yükleme tamamlandı!</span>";
-        fetchRecords();
-      }).catch(()=>{
-        document.getElementById("uploadStatus").innerHTML = "<span class='text-danger'>Yükleme hatası!</span>";
-      });
-    };
-    fetchRecords();
-  </script>
+}
+window.onload = loadRecords;
+
+async function askAI(id){
+    let q = document.getElementById("q_"+id).value;
+    if(!q) return;
+    let form = new FormData();
+    form.append("id", id);
+    form.append("question", q);
+    let r = await fetch("/ask", {method:"POST", body:form});
+    let js = await r.json();
+    document.getElementById("a_"+id).innerText = js.answer;
+}
+</script>
 </body>
 </html>
