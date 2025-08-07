@@ -1,80 +1,76 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-  <meta charset="UTF-8">
-  <title>Belge Dedektif – Fatura/Fiş Analiz Platformu</title>
-  <style>
-    body { font-family: Arial; background: #f7fafd; }
-    h1 { color: #1e63d1; }
-    #belgeler { width: 95%; margin: 20px auto; border-collapse: collapse; }
-    #belgeler th, #belgeler td { border: 1px solid #aaa; padding: 5px; }
-    #belgeler th { background: #e7effb; }
-    .success { color: green; }
-    .error { color: red; }
-  </style>
+    <meta charset="UTF-8">
+    <title>Belge Dedektif – Fatura/Fiş Analiz Platformu</title>
+    <style>
+        body { font-family: Arial; margin: 2rem; background: #f5f7fa; }
+        h2 { color: #2a71d0 }
+        table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+        th, td { border: 1px solid #b6b6b6; padding: 7px; text-align: left; }
+        th { background: #d7e8fa; }
+        .success { color: green; }
+        .fail { color: red; }
+    </style>
 </head>
 <body>
-  <h1>Belge Dedektif – Fatura/Fiş Analiz Platformu</h1>
-  <input type="file" id="dosya"><button onclick="yukle()">Yükle & Analiz Et</button>
-  <span id="mesaj"></span>
-  <hr>
-  <b>Yüklenen Belgeler</b>
-  <table id="belgeler">
-    <tr>
-      <th>Ad</th><th>Tarih</th><th>Firma</th><th>KDV</th><th>Toplam</th><th>Al Soru</th>
-    </tr>
-    <tbody id="tablo"></tbody>
-  </table>
-  <script>
-    function tabloyuGuncelle() {
-      fetch("/records").then(r => r.json()).then(data => {
-        let t = '';
-        data.records.forEach(d => {
-          t += `<tr>
-            <td><a href="${d.blob_url}" target="_blank">${d.ad}</a></td>
-            <td>${d.tarih||''}</td>
-            <td>${d.firma||''}</td>
-            <td>${d.kdv||''}</td>
-            <td>${d.toplam||''}</td>
-            <td>
-              <input placeholder="Sor..." id="q${d.ad.replace(/[^a-zA-Z0-9]/g,'')}" style="width:110px">
-              <button onclick="sor('${d.ad}')">Sor</button>
-              <div id="a${d.ad.replace(/[^a-zA-Z0-9]/g,'')}"></div>
-            </td>
-          </tr>`;
-        });
-        document.getElementById("tablo").innerHTML = t;
-      });
+    <h2>Belge Dedektif – Fatura/Fiş Analiz Platformu</h2>
+    <input type="file" id="fileInput">
+    <button onclick="uploadFile()">Yükle & Analiz Et</button>
+    <p id="status"></p>
+    <hr>
+    <h3>Yüklenen Belgeler</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Ad</th>
+                <th>Tarih</th>
+                <th>Firma</th>
+                <th>KDV</th>
+                <th>Toplam</th>
+                <th>OCR</th>
+                <th>İndir</th>
+            </tr>
+        </thead>
+        <tbody id="recordsTable"></tbody>
+    </table>
+<script>
+async function uploadFile() {
+    let fileInput = document.getElementById('fileInput');
+    if (!fileInput.files.length) return alert("Dosya seçin!");
+    let file = fileInput.files[0];
+    let formData = new FormData();
+    formData.append("file", file);
+
+    document.getElementById('status').innerText = "Yükleniyor...";
+    let res = await fetch('/upload-analyze', { method: 'POST', body: formData });
+    let data = await res.json();
+    if (data.success) {
+        document.getElementById('status').innerHTML = `<span class="success">Başarılı! OCR: <br>${data.ocr.slice(0,250)}...</span>`;
+        loadRecords();
+    } else {
+        document.getElementById('status').innerHTML = `<span class="fail">Hata: ${data.error}</span>`;
     }
-    function yukle() {
-      var f = document.getElementById("dosya").files[0];
-      if (!f) return alert("Dosya seç!");
-      var fd = new FormData();
-      fd.append("file", f);
-      fetch("/upload-analyze", {method: "POST", body: fd})
-        .then(r=>r.json()).then(res => {
-          if (res.filename) {
-            document.getElementById("mesaj").innerHTML = "<span class='success'>Başarılı!</span>";
-            tabloyuGuncelle();
-          } else {
-            document.getElementById("mesaj").innerHTML = "<span class='error'>Hata: "+(res.detail||"")+"</span>";
-          }
-        });
-    }
-    function sor(ad) {
-      var qid = "q"+ad.replace(/[^a-zA-Z0-9]/g,'');
-      var aid = "a"+ad.replace(/[^a-zA-Z0-9]/g,'');
-      var soru = document.getElementById(qid).value;
-      var fd = new FormData();
-      fd.append("filename", ad);
-      fd.append("question", soru);
-      fetch("/ai-ask", {method:"POST", body:fd})
-        .then(r=>r.json()).then(res => {
-          document.getElementById(aid).innerText = res.answer;
-        });
-    }
-    tabloyuGuncelle();
-    setInterval(tabloyuGuncelle, 10000);
-  </script>
+}
+
+async function loadRecords() {
+    let res = await fetch('/records');
+    let data = await res.json();
+    let html = "";
+    data.records.forEach(r => {
+        html += `<tr>
+            <td>${r.Ad}</td>
+            <td>${r.Tarih}</td>
+            <td>${r.Firma}</td>
+            <td>${r.KDV}</td>
+            <td>${r.Toplam}</td>
+            <td>${r.OCR.slice(0, 80)}...</td>
+            <td><a href="${r.BlobURL}" target="_blank">İndir</a></td>
+        </tr>`;
+    });
+    document.getElementById('recordsTable').innerHTML = html;
+}
+window.onload = loadRecords;
+</script>
 </body>
 </html>
