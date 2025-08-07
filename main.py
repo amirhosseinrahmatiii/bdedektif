@@ -1,167 +1,172 @@
 import os
-import io
-import time
-import random
-import datetime
-import re
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
-from fastapi.responses import FileResponse, JSONResponse
+import uuid
+import pyodbc
+import openai
+from fastapi import FastAPI, File, UploadFile, Form
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-
+from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 from azure.storage.blob import BlobServiceClient
 from azure.cognitiveservices.vision.computervision import ComputerVisionClient
 from msrest.authentication import CognitiveServicesCredentials
-import pyodbc
-import openai
+from PyPDF2 import PdfReader
+from docx import Document
 
-# .env'den tüm ayarları al
-AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
-AZURE_CONTAINER_NAME = os.getenv("AZURE_CONTAINER_NAME")
-AZURE_OCR_ENDPOINT = os.getenv("AZURE_OCR_ENDPOINT")
-AZURE_OCR_KEY = os.getenv("AZURE_OCR_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-SQL_SERVER = os.getenv("SQL_SERVER")
-SQL_DB = os.getenv("SQL_DB")
-SQL_USER = os.getenv("SQL_USER")
-SQL_PASSWORD = os.getenv("SQL_PASSWORD")
+# ENV yükle
+load_dotenv()
 
-# FastAPI app başlat
+# Config
+blob_conn_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+blob_container = os.getenv("AZURE_CONTAINER_NAME")
+ocr_endpoint = os.getenv("AZURE_OCR_ENDPOINT")
+ocr_key = os.getenv("AZURE_OCR_KEY")
+openai.api_key = os.getenv("OPENAI_API_KEY")
+sql_server = os.getenv("SQL_SERVER")
+sql_db = os.getenv("SQL_DB")
+sql_user = os.getenv("SQL_USER")
+sql_pass = os.getenv("SQL_PASSWORD")
+
+# App başlat
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], allow_credentials=True,
+    allow_methods=["*"], allow_headers=["*"],
+)
 
-# Statik dosya (arayüz) bağla
+# Static dosyalar
 static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 @app.get("/")
-def root():
-    return FileResponse(os.path.join(static_dir, "index.html"))
+def home():
+    with open(os.path.join(static_dir, "index.html"), encoding="utf-8") as f:
+        return HTMLResponse(f.read())
 
-# Azure servislerini başlat
-blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
-container_client = blob_service_client.get_container_client(AZURE_CONTAINER_NAME)
-cv_client = ComputerVisionClient(AZURE_OCR_ENDPOINT, CognitiveServicesCredentials(AZURE_OCR_KEY))
-openai.api_key = OPENAI_API_KEY
+def get_sql_conn():
+    conn_str = (
+        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        f"SERVER={sql_server};DATABASE={sql_db};UID={sql_user};PWD={sql_pass}"
+    )
+    return pyodbc.connect(conn_str)
 
-# SQL bağlantısı
-conn_str = (
-    "Driver={ODBC Driver 17 for SQL Server};"
-    f"Server={SQL_SERVER};"
-    f"Database={SQL_DB};"
-    f"Uid={SQL_USER};"
-    f"Pwd={SQL_PASSWORD};"
-    "Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;"
-)
-conn = pyodbc.connect(conn_str, autocommit=True)
-cursor = conn.cursor()
-
-# Tablo oluştur (varsa atla)
-try:
-    cursor.execute("""
-        CREATE TABLE invoices (
-            id INT IDENTITY(1,1) PRIMARY KEY,
-            file_name NVARCHAR(255),
-            blob_url NVARCHAR(500),
-            extracted_text NVARCHAR(MAX),
-            total_amount DECIMAL(10,2),
-            vat_amount DECIMAL(10,2),
-            vendor_name NVARCHAR(255),
-            uploaded_at DATETIME DEFAULT GETDATE()
-        )
-    """)
-except Exception as e:
-    if "There is already an object named" not in str(e):
-        print("DB table error:", e)
-
-# OCR ve basit analiz
-def parse_invoice_text(text):
-    total, vat, vendor = None, None, ""
-    # Burada daha gelişmiş bir regex ve metin analiz kodu kullanılabilir
-    lines = text.splitlines()
-    for l in lines:
-        if not vendor and not re.search(r'\d', l):
-            vendor = l.strip()
-        if not total and ("toplam" in l.lower() or "total" in l.lower()):
-            num = re.findall(r"[\d.,]+", l)
-            if num: total = float(num[-1].replace(",", "."))
-        if not vat and ("kdv" in l.lower() or "vat" in l.lower()):
-            num = re.findall(r"[\d.,]+", l)
-            if num: vat = float(num[-1].replace(",", "."))
-    return total or 0.0, vat or 0.0, vendor or ""
-
-# Dosya yükle ve analiz et
-@app.post("/upload-analyze")
-async def upload_analyze(file: UploadFile = File(...)):
-    # 1. Dosyayı Blob'a kaydet
-    file_bytes = await file.read()
-    unique_name = f"{int(time.time()*1000)}_{random.randint(1000,9999)}_{file.filename}"
-    blob_client = container_client.get_blob_client(unique_name)
-    blob_client.upload_blob(file_bytes, overwrite=True)
-    blob_url = blob_client.url
-
-    # 2. OCR ile metin çıkar
-    ocr_text = ""
+def save_to_sql(filename, date, company, vat, total, text, blob_url):
     try:
-        read_response = cv_client.read_in_stream(io.BytesIO(file_bytes), raw=True)
-        operation_id = read_response.headers["Operation-Location"].split("/")[-1]
-        for _ in range(10):
-            result = cv_client.get_read_result(operation_id)
-            if result.status.lower() == "succeeded":
-                ocr_text = "\n".join([line.text for page in result.analyze_result.read_results for line in page.lines])
-                break
-            time.sleep(1)
+        conn = get_sql_conn()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO Belgeler (Ad, Tarih, Firma, KDV, Toplam, OCR, BlobURL)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, filename, date, company, vat, total, text, blob_url)
+        conn.commit()
+        cursor.close()
+        conn.close()
     except Exception as e:
-        ocr_text = ""
+        print("SQL ERROR:", e)
 
-    # 3. Temel analiz (KDV/toplam/vendor vs)
-    total, vat, vendor = parse_invoice_text(ocr_text)
+def upload_to_blob(file: UploadFile, content):
+    blob_service = BlobServiceClient.from_connection_string(blob_conn_str)
+    fname = str(uuid.uuid4()) + "_" + file.filename
+    blob_client = blob_service.get_blob_client(container=blob_container, blob=fname)
+    blob_client.upload_blob(content, overwrite=True)
+    blob_url = blob_client.url
+    return blob_url
 
-    # 4. SQL'e kaydet
-    cursor.execute("""
-        INSERT INTO invoices (file_name, blob_url, extracted_text, total_amount, vat_amount, vendor_name)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (file.filename, blob_url, ocr_text, total, vat, vendor))
+def ocr_text(path, filetype):
+    # Universal OCR
+    if filetype in ["jpg", "jpeg", "png"]:
+        client = ComputerVisionClient(ocr_endpoint, CognitiveServicesCredentials(ocr_key))
+        with open(path, "rb") as image_stream:
+            ocr_result = client.recognize_printed_text_in_stream(image=image_stream, language="tr")
+        lines = []
+        for r in ocr_result.regions:
+            for l in r.lines:
+                lines.append(" ".join([w.text for w in l.words]))
+        return "\n".join(lines)
+    elif filetype == "pdf":
+        pdf = PdfReader(path)
+        return "\n".join([p.extract_text() or "" for p in pdf.pages])
+    elif filetype == "docx":
+        doc = Document(path)
+        return "\n".join([p.text for p in doc.paragraphs])
+    elif filetype == "txt":
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    return ""
 
+def extract_info(text):
+    # Demo: Basit regex ile KDV/toplam/tarih/firma (Geliştirilebilir!)
+    import re
+    tarih = re.findall(r"\d{2}[./-]\d{2}[./-]\d{4}", text)
+    kdv = re.findall(r"KDV[^\d]*(\d+[\.,]?\d*)", text, re.IGNORECASE)
+    toplam = re.findall(r"TOPLAM[^\d]*(\d+[\.,]?\d*)", text, re.IGNORECASE)
+    firma = re.findall(r"(?:Ticaret|Ltd\.? Şti\.?|A\.Ş\.?|\.Şirketi|Firma)\s*([^\n]*)", text, re.IGNORECASE)
     return {
-        "message": "Başarılı!",
-        "filename": file.filename,
-        "blob_url": blob_url,
-        "extracted_text": ocr_text[:200] + ("..." if len(ocr_text) > 200 else ""),
-        "total_amount": total,
-        "vat_amount": vat,
-        "vendor_name": vendor
+        "tarih": tarih[0] if tarih else "",
+        "kdv": kdv[0] if kdv else "",
+        "toplam": toplam[0] if toplam else "",
+        "firma": firma[0] if firma else "",
     }
 
-# Kayıtları getir
-@app.get("/records")
-def records():
-    cursor.execute("SELECT id, file_name, blob_url, total_amount, vat_amount, vendor_name, uploaded_at FROM invoices ORDER BY uploaded_at DESC")
-    rows = cursor.fetchall()
-    return {"records": [
-        {
-            "id": r[0], "filename": r[1], "blob_url": r[2],
-            "total_amount": float(r[3] or 0), "vat_amount": float(r[4] or 0),
-            "vendor_name": r[5], "uploaded_at": str(r[6])
-        }
-        for r in rows
-    ]}
+@app.post("/upload-analyze")
+async def upload_analyze(file: UploadFile = File(...)):
+    # 1. Blob'a yükle
+    content = await file.read()
+    blob_url = upload_to_blob(file, content)
+    # 2. Geçici dosya kaydet
+    tmp_path = "/tmp/" + file.filename
+    with open(tmp_path, "wb") as f:
+        f.write(content)
+    ext = file.filename.split(".")[-1].lower()
+    # 3. OCR veya içeriği oku
+    text = ocr_text(tmp_path, ext)
+    info = extract_info(text)
+    # 4. SQL'e kaydet
+    save_to_sql(file.filename, info["tarih"], info["firma"], info["kdv"], info["toplam"], text, blob_url)
+    # 5. Sonucu döndür
+    return {
+        "filename": file.filename,
+        "blob_url": blob_url,
+        "tarih": info["tarih"],
+        "firma": info["firma"],
+        "kdv": info["kdv"],
+        "toplam": info["toplam"],
+        "ocr_text": text
+    }
 
-# Bir dosya hakkında OpenAI'ye soru sor
-@app.post("/ask")
-async def ask_ai(id: int = Form(...), question: str = Form(...)):
-    cursor.execute("SELECT extracted_text FROM invoices WHERE id=?", id)
+@app.get("/records")
+def get_records():
+    conn = get_sql_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT Ad, Tarih, Firma, KDV, Toplam, BlobURL FROM Belgeler ORDER BY id DESC")
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    data = [
+        {"ad": r[0], "tarih": r[1], "firma": r[2], "kdv": r[3], "toplam": r[4], "blob_url": r[5]}
+        for r in rows
+    ]
+    return {"records": data}
+
+@app.post("/ai-ask")
+async def ai_ask(filename: str = Form(...), question: str = Form(...)):
+    conn = get_sql_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT OCR FROM Belgeler WHERE Ad=?", filename)
     row = cursor.fetchone()
-    if not row or not row[0]:
-        return {"answer": "Belge bulunamadı."}
-    text = row[0]
-    prompt = f"Belge içeriği:\n{text}\nKullanıcı sorusu: {question}\nKısa, açık, doğru cevap ver."
+    cursor.close()
+    conn.close()
+    if not row:
+        return {"answer": "Belge bulunamadı"}
+    text = row[0][:8000]
+    # AI ile soruyu yanıtla
     response = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
         messages=[
-            {"role": "system", "content": "Belge sorularını kısa, net ve doğru yanıtla."},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=200,
-        temperature=0.2
+            {"role":"system", "content":"Aşağıda bir fatura/fiş OCR metni var. Soruya bu metne göre cevap ver."},
+            {"role":"user", "content": f"{question}\n\nBelge:\n{text}"}
+        ]
     )
-    return {"answer": response["choices"][0]["message"]["content"].strip()}
-
+    answer = response.choices[0].message.content
+    return {"answer": answer}
