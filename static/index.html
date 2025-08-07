@@ -1,98 +1,223 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-  <meta charset="UTF-8">
-  <title>BelgeDedektif - AI Destekli Belge Analiz</title>
-  <style>
-    body { font-family: Arial, sans-serif; background: #f8f8f8; margin: 30px; }
-    #result, #lastFiles { background: #fff; border-radius: 10px; margin-top: 20px; padding: 24px; box-shadow: 0 2px 8px #ddd;}
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border: 1px solid #ddd; padding: 8px; }
-    th { background: #eaf2fb; }
-    .askbox { margin-top: 10px;}
-    .blob-link { color: #2471A3; }
-  </style>
+    <meta charset="UTF-8" />
+    <title>BelgeDedektif</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        #summaryPanel { position: fixed; bottom: 10px; left: 10px; border: 1px solid #ccc; padding: 8px; background: #f9f9f9; font-size: 0.9em; }
+        table { border-collapse: collapse; margin-top: 20px; width: 100%; max-width: 800px; }
+        th, td { border: 1px solid #ccc; padding: 5px; text-align: left; }
+        th { background: #eee; }
+        .action-btn { cursor: pointer; color: blue; text-decoration: underline; }
+    </style>
 </head>
 <body>
-  <h1>BelgeDedektif’e Hoşgeldiniz!</h1>
-  <form id="uploadForm">
-    <input type="file" name="files" id="files" multiple accept=".pdf,.docx,.txt,.jpg,.jpeg,.png">
-    <button type="submit">Yükle & Analiz Et</button>
-  </form>
-  <div id="result"></div>
-  <div id="lastFiles">
-    <h2>Son Yüklenen Belgeler</h2>
-    <table id="filesTable"><thead>
-      <tr><th>Dosya</th><th>Tarih</th><th>KDV</th><th>Toplam</th><th>İşlem</th></tr>
-    </thead><tbody></tbody></table>
-  </div>
+    <h1>BelgeDedektif'e Hoşgeldiniz!</h1>
+    <input type="file" id="fileInput" multiple />
+    <button id="uploadBtn">Yükle &amp; Analiz Et</button>
 
-  <!-- Soru sor modalı -->
-  <div id="modal" style="display:none; position:fixed; top:30%; left:50%; transform:translate(-50%,-50%); background:#fff; border:1px solid #888; border-radius:12px; padding:32px; z-index:10;">
-    <h3>Yapay Zekaya Soru Sor</h3>
-    <input type="text" id="q" placeholder="Sorunuzu yazın..." style="width:90%;">
-    <button id="askBtn">Sor</button>
-    <div id="aiCevap" style="margin-top:20px;"></div>
-    <button onclick="closeModal()">Kapat</button>
-  </div>
-  <script>
-    let lastFiles = [];
-    function showModal(id) {
-      document.getElementById("modal").style.display = "block";
-      document.getElementById("askBtn").onclick = async function() {
-        let soru = document.getElementById("q").value;
-        document.getElementById("aiCevap").innerHTML = "Cevaplanıyor...";
-        const res = await fetch('/ask', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ doc_id: id, question: soru })
+    <table id="recordsTable">
+        <thead>
+            <tr>
+                <th>Dosya Adı</th>
+                <th>Tutar</th>
+                <th>KDV</th>
+                <th>Firma/Kişi</th>
+                <th>İşlemler</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Records will be populated here -->
+        </tbody>
+    </table>
+
+    <div id="summaryPanel">
+        <div><strong>Bu Ayki Toplam Fiş Tutarı:</strong> <span id="sumTotal">0</span> TL</div>
+        <div><strong>Bu Ayki Toplam KDV:</strong> <span id="sumVAT">0</span> TL</div>
+        <div><strong>Bu Ay En Çok Fiş Kesilenler:</strong></div>
+        <ul id="topVendorsList"></ul>
+    </div>
+
+    <input type="file" id="updateFileInput" style="display:none;" />
+
+    <script>
+        document.getElementById('uploadBtn').addEventListener('click', function() {
+            const fileInput = document.getElementById('fileInput');
+            const files = fileInput.files;
+            if (!files.length) {
+                alert('Lütfen en az bir dosya seçin.');
+                return;
+            }
+            const formData = new FormData();
+            for (let i = 0; i < files.length; i++) {
+                formData.append('files', files[i]);
+            }
+            fetch('/upload-analyze', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log(data);
+                if (data.results) {
+                    data.results.forEach(res => {
+                        addRecordToTable(res);
+                    });
+                }
+                refreshSummary();
+            })
+            .catch(err => {
+                console.error('Upload error', err);
+                alert('Dosyalar yüklenirken bir hata oluştu.');
+            });
         });
-        const data = await res.json();
-        document.getElementById("aiCevap").innerHTML = "<b>Cevap:</b><br>"+data.answer;
-      }
-    }
-    function closeModal() {
-      document.getElementById("modal").style.display = "none";
-      document.getElementById("q").value = "";
-      document.getElementById("aiCevap").innerHTML = "";
-    }
-    document.getElementById('uploadForm').addEventListener('submit', async function(e){
-      e.preventDefault();
-      const filesInput = document.getElementById('files');
-      const resultDiv = document.getElementById('result');
-      resultDiv.innerHTML = "Yükleniyor, lütfen bekleyin...";
-      const formData = new FormData();
-      for (const file of filesInput.files) {
-        formData.append('files', file);
-      }
-      const res = await fetch('/upload-analyze', {
-        method: 'POST',
-        body: formData
-      });
-      const data = await res.json();
-      if (data.results && data.results.length > 0) {
-        lastFiles = data.results.concat(lastFiles).slice(0,5); // son 5 belge
-        updateFilesTable();
-        resultDiv.innerHTML = "Yükleme başarılı!";
-      } else {
-        resultDiv.innerHTML = "<span style='color:red'>Hiçbir dosya işlenemedi.</span>";
-      }
-    });
 
-    function updateFilesTable() {
-      const tbody = document.querySelector("#filesTable tbody");
-      tbody.innerHTML = "";
-      for (const f of lastFiles) {
-        let row = `<tr>
-          <td>${f.filename}</td>
-          <td>${f.upload_timestamp || ""}</td>
-          <td>${f.kdv || ""}</td>
-          <td>${f.total || ""}</td>
-          <td><a href="${f.blob_url}" target="_blank">Blob</a> | <button onclick="showModal('${f.id}')">Soru Sor</button></td>
-        </tr>`;
-        tbody.innerHTML += row;
-      }
-    }
-  </script>
+        function addRecordToTable(record) {
+            const tbody = document.querySelector('#recordsTable tbody');
+            const tr = document.createElement('tr');
+            tr.setAttribute('data-id', record.id);
+            // Dosya adı (indirilebilir link olarak)
+            const fileNameTd = document.createElement('td');
+            const downloadLink = document.createElement('a');
+            downloadLink.href = '/download?id=' + record.id;
+            downloadLink.textContent = record.file_name;
+            downloadLink.target = '_blank';
+            fileNameTd.appendChild(downloadLink);
+            tr.appendChild(fileNameTd);
+            // Tutar
+            const totalTd = document.createElement('td');
+            totalTd.textContent = (record.total_amount ?? 0).toFixed(2);
+            tr.appendChild(totalTd);
+            // KDV
+            const vatTd = document.createElement('td');
+            vatTd.textContent = (record.vat_amount ?? 0).toFixed(2);
+            tr.appendChild(vatTd);
+            // Firma/Kişi (satıcı)
+            const vendorTd = document.createElement('td');
+            vendorTd.textContent = record.vendor_name || (record.status === 'error' ? 'OCR Başarısız' : '');
+            tr.appendChild(vendorTd);
+            // İşlemler (Sil/Güncelle)
+            const actionsTd = document.createElement('td');
+            // Sil
+            const delLink = document.createElement('span');
+            delLink.textContent = 'Sil';
+            delLink.className = 'action-btn';
+            delLink.addEventListener('click', function() {
+                deleteRecord(record.id, tr);
+            });
+            actionsTd.appendChild(delLink);
+            actionsTd.appendChild(document.createTextNode(' | '));
+            // Güncelle
+            const updLink = document.createElement('span');
+            updLink.textContent = 'Güncelle';
+            updLink.className = 'action-btn';
+            updLink.addEventListener('click', function() {
+                currentUpdateId = record.id;
+                document.getElementById('updateFileInput').click();
+            });
+            actionsTd.appendChild(updLink);
+            tr.appendChild(actionsTd);
+            tbody.appendChild(tr);
+        }
+
+        // Kayıt silme işlevi
+        function deleteRecord(id, rowElement) {
+            if (!confirm('Bu kaydı silmek istediğinizden emin misiniz?')) {
+                return;
+            }
+            fetch('/delete?id=' + id, { method: 'DELETE' })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Silme işlemi başarısız');
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Tablo satırını kaldır
+                rowElement.remove();
+                // Özeti güncelle
+                refreshSummary();
+            })
+            .catch(err => {
+                console.error('Delete error', err);
+                alert('Silme işlemi sırasında bir hata oluştu.');
+            });
+        }
+
+        // Kayıt güncelleme işlevi
+        let currentUpdateId = null;
+        document.getElementById('updateFileInput').addEventListener('change', function() {
+            if (!currentUpdateId || !this.files.length) return;
+            const formData = new FormData();
+            formData.append('file', this.files[0]);
+            fetch('/update?id=' + currentUpdateId, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                // İlgili satırı güncelle
+                const row = document.querySelector('#recordsTable tbody tr[data-id="' + currentUpdateId + '"]');
+                if (row) {
+                    row.querySelector('td:nth-child(1) a').textContent = data.file_name;
+                    row.querySelector('td:nth-child(1) a').href = '/download?id=' + data.id;
+                    row.querySelector('td:nth-child(2)').textContent = (data.total_amount ?? 0).toFixed(2);
+                    row.querySelector('td:nth-child(3)').textContent = (data.vat_amount ?? 0).toFixed(2);
+                    row.querySelector('td:nth-child(4)').textContent = data.vendor_name || (data.status === 'error' ? 'OCR Başarısız' : '');
+                }
+                // Dosya input'unu sıfırla
+                document.getElementById('updateFileInput').value = '';
+                currentUpdateId = null;
+                // Özeti güncelle
+                refreshSummary();
+            })
+            .catch(err => {
+                console.error('Update error', err);
+                alert('Güncelleme sırasında bir hata oluştu.');
+            });
+        });
+
+        // Aylık özet panelini güncelleme
+        function refreshSummary() {
+            fetch('/summary')
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('sumTotal').textContent = data.total_sum_month.toFixed(2);
+                document.getElementById('sumVAT').textContent = data.total_vat_month.toFixed(2);
+                const topList = document.getElementById('topVendorsList');
+                topList.innerHTML = '';
+                data.top_vendors_month.forEach(item => {
+                    const li = document.createElement('li');
+                    let name = item.vendor;
+                    if (!name || name.trim() === '') {
+                        name = 'Bilinmeyen';
+                    }
+                    li.textContent = name + ' - ' + item.count + ' fiş';
+                    topList.appendChild(li);
+                });
+            })
+            .catch(err => {
+                console.error('Summary fetch error', err);
+            });
+        }
+
+        // Sayfa yüklendiğinde mevcut kayıtları ve özeti getir
+        window.onload = function() {
+            // Kayıtları getir
+            fetch('/records')
+            .then(response => response.json())
+            .then(data => {
+                if (data.records) {
+                    data.records.forEach(rec => {
+                        addRecordToTable(rec);
+                    });
+                }
+            })
+            .catch(err => console.error('Records fetch error', err));
+            // Özet verisini getir
+            refreshSummary();
+        };
+    </script>
 </body>
 </html>
