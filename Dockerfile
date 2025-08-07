@@ -2,7 +2,7 @@ FROM mcr.microsoft.com/azure-functions/python:4-python3.10
 
 # ODBC ve diğer bağımlılıkları yükle
 RUN apt-get update && \
-    apt-get install -y unixodbc unixodbc-dev gcc g++ curl && \
+    apt-get install -y unixodbc-dev gcc g++ curl && \
     curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - && \
     curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list > /etc/apt/sources.list.d/mssql-release.list && \
     apt-get update && \
@@ -15,6 +15,9 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 
 # Tüm uygulamayı kopyala
 COPY . /app
+
+# PYTHONPATH'i ayarla ki Python modülleri bulabilsin
+ENV PYTHONPATH=/app
 
 # Başlatıcı komut
 CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:${PORT:-8000}", "main:app"]
