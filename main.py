@@ -4,18 +4,18 @@ import re
 import random
 import datetime
 import time
-from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from azure.storage.blob import BlobServiceClient
 from azure.cognitiveservices.vision.computervision import ComputerVisionClient
 from msrest.authentication import CognitiveServicesCredentials
 import pyodbc
+import openai
 
-# Initialize FastAPI app
 app = FastAPI()
 
-# Load configuration from environment variables
+# Ortam değişkenlerinden yapılandırma oku
 AZURE_OCR_ENDPOINT = os.getenv('AZURE_OCR_ENDPOINT')
 AZURE_OCR_KEY = os.getenv('AZURE_OCR_KEY')
 AZURE_STORAGE_CONNECTION_STRING = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
@@ -24,73 +24,65 @@ SQL_SERVER = os.getenv('SQL_SERVER')
 SQL_DB = os.getenv('SQL_DB')
 SQL_USER = os.getenv('SQL_USER')
 SQL_PASSWORD = os.getenv('SQL_PASSWORD')
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai.api_key = OPENAI_API_KEY
 
 if not AZURE_OCR_ENDPOINT or not AZURE_OCR_KEY or not AZURE_STORAGE_CONNECTION_STRING:
     raise RuntimeError('Missing Azure OCR or Storage configuration')
 
-# Initialize Azure Blob service client and container client
 blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
 container_client = blob_service_client.get_container_client(AZURE_CONTAINER_NAME)
-# Ensure container exists (create if not exists)
 try:
     container_client.create_container()
-except Exception as e:
-    # Container might already exist, ignore
+except Exception:
     pass
 
-# Initialize Azure Computer Vision client for OCR
 cv_client = None
 if AZURE_OCR_ENDPOINT and AZURE_OCR_KEY:
     cv_client = ComputerVisionClient(AZURE_OCR_ENDPOINT, CognitiveServicesCredentials(AZURE_OCR_KEY))
 
-# Connect to Azure SQL Database using pyodbc
-conn_str = 'Driver={ODBC Driver 17 for SQL Server};Server=' + (SQL_SERVER or '') + ';Database=' + (SQL_DB or '') + ';Uid=' + (SQL_USER or '') + ';Pwd=' + (SQL_PASSWORD or '') + ';Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;'
+conn_str = (
+    f'Driver={{ODBC Driver 17 for SQL Server}};Server={SQL_SERVER};Database={SQL_DB};'
+    f'Uid={SQL_USER};Pwd={SQL_PASSWORD};Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;'
+)
 try:
     conn = pyodbc.connect(conn_str, autocommit=True)
 except Exception as e:
     raise RuntimeError(f'Database connection failed: {e}')
 cursor = conn.cursor()
-
-# Create invoices table if not exists
 try:
-    cursor.execute("CREATE TABLE invoices (id INT IDENTITY(1,1) PRIMARY KEY, user_id NVARCHAR(100), file_name NVARCHAR(255), blob_url NVARCHAR(500), extracted_text NVARCHAR(MAX), total_amount DECIMAL(10,2), vat_amount DECIMAL(10,2), vendor_name NVARCHAR(255), uploaded_at DATETIME DEFAULT GETDATE())")
+    cursor.execute(
+        "CREATE TABLE invoices (id INT IDENTITY(1,1) PRIMARY KEY, user_id NVARCHAR(100), file_name NVARCHAR(255), "
+        "blob_url NVARCHAR(500), extracted_text NVARCHAR(MAX), total_amount DECIMAL(10,2), vat_amount DECIMAL(10,2), "
+        "vendor_name NVARCHAR(255), uploaded_at DATETIME DEFAULT GETDATE())"
+    )
 except Exception as e:
-    # If table already exists, ignore the error
-    err_msg = str(e)
-    if 'There is already an object named' not in err_msg:
-        print(f'Error creating table: {err_msg}')
+    if 'There is already an object named' not in str(e):
+        print(f'Error creating table: {e}')
 
-# In test phase, we use a default user identifier for data separation
 DEFAULT_USER = 'demo_user'
+DOCUMENTS = {}
 
-# Helper function to parse extracted text for invoice data (total, VAT, vendor)
 def parse_invoice_text(text: str):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     total_amount = None
     vat_amount = 0.0
     vendor_name = ''
-    # Identify vendor name (first non-trivial line that is likely vendor)
     for i, line in enumerate(lines):
-        # Skip lines that are clearly not vendor names
         if line.upper().startswith('T.C.') or 'TURKIYE' in line.upper():
             continue
         if any(keyword in line.upper() for keyword in ['BIRIM', 'BAKANLI', 'MUDURLUGU']):
             continue
-        # Skip lines that look like phone numbers or website (contain long digit sequences)
         if re.search(r'[0-9]{3,}', line):
             if len(re.findall(r'\d', line)) > 4:
                 continue
-        # Skip lines containing address indicators
         if any(word in line.upper() for word in ['SOKAK', 'CAD', 'NO:', 'NO ']):
             continue
-        # Skip personal name if the next line is a department or ministry
         if i < len(lines) - 1 and any(keyword in lines[i+1].upper() for keyword in ['BIRIM', 'BAKANLI', 'MUDURLUGU']):
             if len(line.split()) <= 2:
                 continue
-        # If we reach here, consider this line as vendor name
         vendor_name = line
         break
-    # Find total amount (search 'Genel Toplam' or last 'Toplam'/'Total')
     total_pattern = re.compile(r'(toplam|total)', re.IGNORECASE)
     total_line = None
     for line in lines:
@@ -102,7 +94,6 @@ def parse_invoice_text(text: str):
         if candidates:
             total_line = candidates[-1]
     if total_line:
-        # Extract last number in that line as total
         nums = re.findall(r'[0-9]+[\.,][0-9]+|[0-9]+', total_line)
         if nums:
             total_str = nums[-1]
@@ -112,12 +103,10 @@ def parse_invoice_text(text: str):
                     total_str = total_str.replace('.', '').replace(',', '.')
                 elif ',' in total_str:
                     total_str = total_str.replace(',', '.')
-                # Convert to float
                 try:
                     total_amount = float(total_str)
                 except:
                     total_amount = None
-    # Find VAT amounts (lines containing 'KDV' or 'VAT')
     vat_amount = 0.0
     for line in lines:
         if 'KDV' in line.upper() or 'VAT' in line.upper():
@@ -154,16 +143,13 @@ async def upload_analyze(files: list[UploadFile] = File(...)):
         total_amount = 0.0
         vat_amount = 0.0
         vendor_name = ''
-        # OCR processing
         try:
             if cv_client:
-                # Use Azure Computer Vision Read API
                 read_response = cv_client.read_in_stream(io.BytesIO(file_bytes), raw=True)
                 operation_location = read_response.headers.get('Operation-Location')
                 if not operation_location:
                     raise Exception('No Operation-Location returned from OCR API')
                 operation_id = operation_location.split('/')[-1]
-                # Poll for result (up to ~10 seconds)
                 for attempt in range(10):
                     result = cv_client.get_read_result(operation_id)
                     if result.status.lower() not in ['notstarted', 'running']:
@@ -171,7 +157,6 @@ async def upload_analyze(files: list[UploadFile] = File(...)):
                     time.sleep(1)
                 if result.status.lower() != 'succeeded':
                     raise Exception('OCR processing failed or timed out')
-                # Combine text lines from result
                 text_parts = []
                 for page in result.analyze_result.read_results:
                     for line in page.lines:
@@ -179,25 +164,21 @@ async def upload_analyze(files: list[UploadFile] = File(...)):
                 extracted_text = '\n'.join(text_parts)
             else:
                 raise Exception('OCR client not initialized')
-        except Exception as e:
+        except Exception:
             status = 'error'
             extracted_text = ''
-            # (Error details can be logged if needed)
-        # Parse text for financial data
         if extracted_text:
             total_amount, vat_amount, vendor_name = parse_invoice_text(extracted_text)
         else:
             total_amount, vat_amount, vendor_name = 0.0, 0.0, ''
-        # Upload file to Azure Blob Storage
         blob_name = f"{DEFAULT_USER}_{int(time.time()*1000)}_{random.randint(0,9999)}_{file_name}"
         try:
             blob_client = container_client.get_blob_client(blob_name)
             blob_client.upload_blob(file_bytes, overwrite=True)
             blob_url = blob_client.url
-        except Exception as e:
+        except Exception:
             status = 'error'
             blob_url = ''
-        # Save record in database
         record_id = None
         try:
             cursor.execute("""INSERT INTO invoices (user_id, file_name, blob_url, extracted_text, total_amount, vat_amount, vendor_name) 
@@ -209,7 +190,11 @@ async def upload_analyze(files: list[UploadFile] = File(...)):
                 record_id = int(row[0])
         except Exception as e:
             print(f'DB insert error: {e}')
-        # Append result for this file
+        # AI için kaydet (yalnızca test fazı için; kalıcı DB'de olması önerilir)
+        DOCUMENTS[file_name] = {
+            "extracted_text": extracted_text,
+            "blob_url": blob_url
+        }
         results.append({
             'id': record_id,
             'file_name': file_name,
@@ -228,7 +213,6 @@ async def upload_analyze(files: list[UploadFile] = File(...)):
 @app.get('/summary')
 def get_summary():
     user = DEFAULT_USER
-    # current year and month
     now = datetime.datetime.now()
     year = now.year
     month = now.month
@@ -242,7 +226,6 @@ def get_summary():
             total_vat = float(row[1]) if row[1] is not None else 0.0
     except Exception as e:
         print(f'Error querying totals: {e}')
-    # Top 3 vendors by count in current month
     top_vendors = []
     try:
         cursor.execute("SELECT TOP 3 vendor_name, COUNT(*) as cnt FROM invoices WHERE user_id=? AND YEAR(uploaded_at)=? AND MONTH(uploaded_at)=? GROUP BY vendor_name ORDER BY cnt DESC", (user, year, month))
@@ -282,7 +265,6 @@ def list_records():
 @app.delete('/delete')
 def delete_record(id: int):
     user = DEFAULT_USER
-    # Fetch blob URL for the record
     try:
         cursor.execute("SELECT blob_url FROM invoices WHERE id=? AND user_id=?", (id, user))
         row = cursor.fetchone()
@@ -291,24 +273,20 @@ def delete_record(id: int):
         blob_url = row[0] or ''
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Database error: {e}')
-    # Derive blob name from URL
     blob_name = ''
     try:
         if blob_url:
             parts = blob_url.split('/')
             if len(parts) >= 5:
-                # parts[4] is container name, [5:] is blob path
                 blob_name = '/'.join(parts[4:])
     except Exception as e:
         print(f'Error parsing blob URL: {e}')
-    # Delete blob from storage first
     if blob_name:
         try:
             blob_client = container_client.get_blob_client(blob_name)
             blob_client.delete_blob()
         except Exception as e:
             raise HTTPException(status_code=500, detail=f'Failed to delete file from storage: {e}')
-    # Delete record from database
     try:
         cursor.execute("DELETE FROM invoices WHERE id=? AND user_id=?", (id, user))
     except Exception as e:
@@ -318,7 +296,6 @@ def delete_record(id: int):
 @app.post('/update')
 async def update_record(id: int, file: UploadFile = File(...)):
     user = DEFAULT_USER
-    # Ensure record exists and get old blob info
     try:
         cursor.execute("SELECT blob_url FROM invoices WHERE id=? AND user_id=?", (id, user))
         row = cursor.fetchone()
@@ -336,7 +313,6 @@ async def update_record(id: int, file: UploadFile = File(...)):
     total_amount = 0.0
     vat_amount = 0.0
     vendor_name = ''
-    # OCR on new file
     try:
         if cv_client:
             read_response = cv_client.read_in_stream(io.BytesIO(new_bytes), raw=True)
@@ -358,14 +334,13 @@ async def update_record(id: int, file: UploadFile = File(...)):
             extracted_text = '\n'.join(text_parts)
         else:
             raise Exception('OCR client not initialized')
-    except Exception as e:
+    except Exception:
         status = 'error'
         extracted_text = ''
     if extracted_text:
         total_amount, vat_amount, vendor_name = parse_invoice_text(extracted_text)
     else:
         total_amount, vat_amount, vendor_name = 0.0, 0.0, ''
-    # Delete old blob file
     if old_blob_url:
         try:
             parts = old_blob_url.split('/')
@@ -375,7 +350,6 @@ async def update_record(id: int, file: UploadFile = File(...)):
                 blob_client.delete_blob()
         except Exception as e:
             print(f'Warning: could not delete old blob: {e}')
-    # Upload new file to blob storage
     new_blob_name = f"{DEFAULT_USER}_{int(time.time()*1000)}_{random.randint(0,9999)}_{new_name}"
     new_blob_url = ''
     try:
@@ -384,7 +358,6 @@ async def update_record(id: int, file: UploadFile = File(...)):
         new_blob_url = new_blob_client.url
     except Exception as e:
         status = 'error'
-    # Update database record
     try:
         cursor.execute("UPDATE invoices SET file_name=?, blob_url=?, extracted_text=?, total_amount=?, vat_amount=?, vendor_name=? WHERE id=? AND user_id=?", 
                        (new_name, new_blob_url, extracted_text, total_amount, vat_amount, vendor_name, id, user))
@@ -403,5 +376,27 @@ async def update_record(id: int, file: UploadFile = File(...)):
         'vendor_name': vendor_name
     }
 
-# Mount static directory to serve the web interface
+# AI ile soru sor endpoint'i
+@app.post("/ask")
+async def ask_ai(filename: str, question: str):
+    doc = DOCUMENTS.get(filename)
+    if not doc or not doc.get("extracted_text"):
+        raise HTTPException(status_code=404, detail="Belge bulunamadı veya analiz edilmemiş.")
+    prompt = f"Bir kullanıcı sana şu belgeyi yükledi:\n---\n{doc['extracted_text']}\n---\nKullanıcının sorusu: {question}\nLütfen belgeye göre doğru ve kısa cevap ver."
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Kısa, doğru, sade bir cevap ver. Eğer belgeyle ilgili değilse, 'Belge içeriğinde bu bilgi yok' de."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=200,
+            temperature=0.2
+        )
+        answer = response['choices'][0]['message']['content'].strip()
+        return {"answer": answer}
+    except Exception as e:
+        return {"error": str(e)}
+
+# Arayüz için statik dosyaları sun
 app.mount('/', StaticFiles(directory='static', html=True), name='static')
