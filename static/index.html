@@ -1,51 +1,98 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-    <meta charset="UTF-8">
-    <title>BelgeDedektif</title>
-    <style>
-        body { font-family: Arial, sans-serif; padding: 30px; }
-        #sonuc { margin-top: 24px; background: #fafafa; border: 1px solid #eee; padding: 16px; border-radius: 7px; }
-        .link { margin-top: 8px; display: block; }
-        h1 { color: #222; }
-        input, button { font-size: 16px; }
-    </style>
+  <meta charset="UTF-8">
+  <title>BelgeDedektif - AI Destekli Belge Analiz</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f8f8f8; margin: 30px; }
+    #result, #lastFiles { background: #fff; border-radius: 10px; margin-top: 20px; padding: 24px; box-shadow: 0 2px 8px #ddd;}
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ddd; padding: 8px; }
+    th { background: #eaf2fb; }
+    .askbox { margin-top: 10px;}
+    .blob-link { color: #2471A3; }
+  </style>
 </head>
 <body>
-    <h1>BelgeDedektif’e Hoşgeldiniz!</h1>
-    <form id="yukleForm">
-        <input type="file" id="dosya" name="files" multiple accept=".pdf,.docx,.txt,.jpg,.jpeg,.png" />
-        <button type="submit">Yükle & Analiz Et</button>
-    </form>
-    <div id="sonuc"></div>
+  <h1>BelgeDedektif’e Hoşgeldiniz!</h1>
+  <form id="uploadForm">
+    <input type="file" name="files" id="files" multiple accept=".pdf,.docx,.txt,.jpg,.jpeg,.png">
+    <button type="submit">Yükle & Analiz Et</button>
+  </form>
+  <div id="result"></div>
+  <div id="lastFiles">
+    <h2>Son Yüklenen Belgeler</h2>
+    <table id="filesTable"><thead>
+      <tr><th>Dosya</th><th>Tarih</th><th>KDV</th><th>Toplam</th><th>İşlem</th></tr>
+    </thead><tbody></tbody></table>
+  </div>
 
-    <script>
-        document.getElementById('yukleForm').onsubmit = async function(e) {
-            e.preventDefault();
-            let formData = new FormData();
-            let files = document.getElementById('dosya').files;
-            for(let i=0; i<files.length; i++) formData.append('files', files[i]);
-            let sonuc = document.getElementById('sonuc');
-            sonuc.innerHTML = 'Yükleniyor...';
-            let res = await fetch('/upload-analyze', {method: 'POST', body: formData});
-            if(res.ok) {
-                let json = await res.json();
-                let html = `<b>${json.message}</b>`;
-                json.results.forEach(item => {
-                    html += `<hr>
-                    <b>Dosya:</b> ${item.filename}<br>
-                    <b>Tür:</b> ${item.file_type}<br>
-                    <b>Boyut:</b> ${(item.file_size/1024).toFixed(1)} KB<br>
-                    <b>Azure Link:</b> <a href="${item.blob_url}" target="_blank" class="link">Dosyayı Görüntüle</a>
-                    <b>Çıkarılan Metin:</b><br>
-                    <pre style="white-space:pre-wrap;">${item.extracted_text}</pre>
-                    <b>Metin Uzunluğu:</b> ${item.text_length}`;
-                });
-                sonuc.innerHTML = html;
-            } else {
-                sonuc.textContent = 'Hata: ' + res.statusText;
-            }
-        }
-    </script>
+  <!-- Soru sor modalı -->
+  <div id="modal" style="display:none; position:fixed; top:30%; left:50%; transform:translate(-50%,-50%); background:#fff; border:1px solid #888; border-radius:12px; padding:32px; z-index:10;">
+    <h3>Yapay Zekaya Soru Sor</h3>
+    <input type="text" id="q" placeholder="Sorunuzu yazın..." style="width:90%;">
+    <button id="askBtn">Sor</button>
+    <div id="aiCevap" style="margin-top:20px;"></div>
+    <button onclick="closeModal()">Kapat</button>
+  </div>
+  <script>
+    let lastFiles = [];
+    function showModal(id) {
+      document.getElementById("modal").style.display = "block";
+      document.getElementById("askBtn").onclick = async function() {
+        let soru = document.getElementById("q").value;
+        document.getElementById("aiCevap").innerHTML = "Cevaplanıyor...";
+        const res = await fetch('/ask', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ doc_id: id, question: soru })
+        });
+        const data = await res.json();
+        document.getElementById("aiCevap").innerHTML = "<b>Cevap:</b><br>"+data.answer;
+      }
+    }
+    function closeModal() {
+      document.getElementById("modal").style.display = "none";
+      document.getElementById("q").value = "";
+      document.getElementById("aiCevap").innerHTML = "";
+    }
+    document.getElementById('uploadForm').addEventListener('submit', async function(e){
+      e.preventDefault();
+      const filesInput = document.getElementById('files');
+      const resultDiv = document.getElementById('result');
+      resultDiv.innerHTML = "Yükleniyor, lütfen bekleyin...";
+      const formData = new FormData();
+      for (const file of filesInput.files) {
+        formData.append('files', file);
+      }
+      const res = await fetch('/upload-analyze', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (data.results && data.results.length > 0) {
+        lastFiles = data.results.concat(lastFiles).slice(0,5); // son 5 belge
+        updateFilesTable();
+        resultDiv.innerHTML = "Yükleme başarılı!";
+      } else {
+        resultDiv.innerHTML = "<span style='color:red'>Hiçbir dosya işlenemedi.</span>";
+      }
+    });
+
+    function updateFilesTable() {
+      const tbody = document.querySelector("#filesTable tbody");
+      tbody.innerHTML = "";
+      for (const f of lastFiles) {
+        let row = `<tr>
+          <td>${f.filename}</td>
+          <td>${f.upload_timestamp || ""}</td>
+          <td>${f.kdv || ""}</td>
+          <td>${f.total || ""}</td>
+          <td><a href="${f.blob_url}" target="_blank">Blob</a> | <button onclick="showModal('${f.id}')">Soru Sor</button></td>
+        </tr>`;
+        tbody.innerHTML += row;
+      }
+    }
+  </script>
 </body>
 </html>
