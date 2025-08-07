@@ -1,23 +1,20 @@
-FROM python:3.11-slim
+FROM mcr.microsoft.com/azure-functions/python:4-python3.10
 
-# Çalışma dizinini ayarla
+# ODBC ve diğer bağımlılıkları yükle
+RUN apt-get update && \
+    apt-get install -y unixodbc-dev gcc g++ curl && \
+    curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - && \
+    curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list > /etc/apt/sources.list.d/mssql-release.list && \
+    apt-get update && \
+    ACCEPT_EULA=Y apt-get install -y msodbcsql18
+
+# Gereken Python paketleri
+COPY requirements.txt /app/
 WORKDIR /app
+RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# Sistem bağımlılıklarını yükle
-RUN apt-get update && apt-get install -y \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+# Tüm uygulamayı kopyala
+COPY . /app
 
-# Python bağımlılıklarını kopyala ve yükle
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Uygulama kodunu kopyala
-COPY . .
-
-# Port'u aç
-EXPOSE 8000
-
-# Uygulamayı başlat
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-
+# Başlatıcı komut
+CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "main:app"]
