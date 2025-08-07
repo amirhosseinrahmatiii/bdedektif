@@ -4,144 +4,87 @@
     <meta charset="UTF-8">
     <title>Belge Dedektif</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <!-- Bootstrap 5 -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { background: #f4f7fb; }
-        .container { max-width: 900px; margin-top: 40px; }
-        .invoice-card { transition: box-shadow 0.2s; }
-        .invoice-card:hover { box-shadow: 0 4px 20px #007bff1a; }
-        .preview-img { max-height: 100px; border-radius: 8px; }
+        .container { margin-top: 30px; }
+        .card { border-radius: 12px; box-shadow: 0 2px 8px #e1e1e1; }
+        .preview-img { max-height: 120px; border-radius: 8px; }
         .table-responsive { max-height: 350px; }
-        #analizSonuc { font-size: 15px; }
     </style>
 </head>
 <body>
-<div class="container">
-    <h2 class="mb-4 fw-bold text-primary">BelgeDedektif’e Hoşgeldiniz!</h2>
-    <!-- Dosya Yükleme Formu -->
-    <form id="belgeForm" class="mb-3" enctype="multipart/form-data">
-        <div class="input-group mb-2">
-            <input class="form-control" type="file" name="files" id="belgeInput" multiple accept=".pdf,.docx,.txt,.jpg,.jpeg,.png" required>
-            <button class="btn btn-success" type="submit">Yükle & Analiz Et</button>
-        </div>
-        <div id="analizSonuc" class="form-text text-success mt-1"></div>
-    </form>
-    <!-- Son Yüklenen Belgeler Tablosu -->
-    <div class="card p-2 shadow-sm">
-        <div class="table-responsive">
-            <table class="table table-striped align-middle" id="belgeTablosu">
-                <thead class="table-light">
-                    <tr>
-                        <th>Dosya</th>
-                        <th>Tarih</th>
-                        <th>KDV</th>
-                        <th>Toplam</th>
-                        <th>Firma/Kişi</th>
-                        <th>İşlem</th>
-                    </tr>
-                </thead>
-                <tbody id="belgeListesi"></tbody>
-            </table>
-        </div>
-    </div>
-    <!-- Soru Sor Alanı -->
-    <div class="card mt-4 p-3">
-        <label for="sorguInput" class="form-label fw-bold">Belgeye Soru Sor:</label>
-        <div class="input-group mb-2">
-            <input type="text" class="form-control" id="sorguInput" placeholder="Örn: Bu faturadaki toplam KDV nedir?">
-            <button id="sorgulaBtn" class="btn btn-primary" type="button">Sor</button>
-        </div>
-        <div id="cevapAlani" style="display: none;" class="alert alert-info mt-2"></div>
-    </div>
-    <!-- Toast/Popup -->
-    <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 1055">
-        <div id="toast" class="toast align-items-center" role="alert" aria-live="assertive" aria-atomic="true">
-            <div class="d-flex">
-                <div class="toast-body" id="toast-body"></div>
-                <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+    <div class="container">
+        <h2 class="mb-4 fw-bold text-primary">BelgeDedektif’e Hoşgeldiniz!</h2>
+        <!-- Dosya Yükleme Formu -->
+        <form id="uploadForm" enctype="multipart/form-data" class="mb-4">
+            <div class="input-group mb-2">
+                <input class="form-control" type="file" name="files" id="fileInput" multiple accept=".pdf,.docx,.txt,.jpg,.jpeg,.png">
+                <button class="btn btn-success" type="submit">Yükle & Analiz Et</button>
+            </div>
+            <div id="uploadStatus" class="form-text text-success mt-1"></div>
+        </form>
+        <!-- Son Yüklenen Belgeler Tablosu -->
+        <div class="card">
+            <div class="card-header bg-light">
+                <b>Son Yüklenen Belgeler</b>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead class="table-primary">
+                        <tr>
+                            <th>Dosya</th>
+                            <th>Tarih</th>
+                            <th>KDV</th>
+                            <th>Toplam</th>
+                            <th>İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recordsTable"></tbody>
+                </table>
             </div>
         </div>
     </div>
-</div>
-
-<!-- Bootstrap ve JS -->
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-function showToast(msg, cls="bg-success") {
-    let t = document.getElementById("toast");
-    document.getElementById("toast-body").innerText = msg;
-    t.className = "toast align-items-center show " + cls;
-    setTimeout(() => t.className = "toast align-items-center " + cls, 3000);
-}
+document.addEventListener("DOMContentLoaded", function () {
+    const uploadForm = document.getElementById('uploadForm');
+    const fileInput = document.getElementById('fileInput');
+    const uploadStatus = document.getElementById('uploadStatus');
+    const recordsTable = document.getElementById('recordsTable');
 
-// Dosya yükleme işlemi
-document.getElementById("belgeForm").onsubmit = async function(e) {
-    e.preventDefault();
-    const fileInput = document.getElementById("belgeInput");
-    if (!fileInput.files.length) return;
-    const formData = new FormData();
-    for (let file of fileInput.files) formData.append("files", file);
-    let analizSonucDiv = document.getElementById("analizSonuc");
-    analizSonucDiv.innerHTML = "Yükleniyor...";
-    try {
-        const resp = await fetch("/upload-analyze", { method: "POST", body: formData });
-        if (!resp.ok) throw new Error("Sunucu hatası");
-        const data = await resp.json();
-        analizSonucDiv.innerHTML = data.message || "Yüklendi!";
-        showToast("Belge başarıyla yüklendi!");
-        guncelleDosyaListesi();
-    } catch (err) {
-        analizSonucDiv.innerHTML = "Yükleme başarısız: " + err.message;
-        showToast("Yükleme başarısız!", "bg-danger");
-    }
-};
+    // Dosya yükleme işlemi
+    uploadForm.onsubmit = async function (e) {
+        e.preventDefault();
+        const formData = new FormData();
+        for (const file of fileInput.files) formData.append("files", file);
+        uploadStatus.textContent = "Yükleniyor...";
+        let resp = await fetch("/upload-analyze", { method: "POST", body: formData });
+        let data = await resp.json();
+        uploadStatus.textContent = data.message || "Yükleme tamamlandı!";
+        loadRecords();
+    };
 
-async function guncelleDosyaListesi() {
-    // /records endpointinden son yüklenenleri çek
-    const resp = await fetch("/records");
-    const data = await resp.json();
-    const tbody = document.getElementById("belgeListesi");
-    tbody.innerHTML = "";
-    for (const belge of (data.records || [])) {
-        tbody.innerHTML += `<tr>
-            <td>${belge.file_name}</td>
-            <td>${belge.uploaded_at || "-"}</td>
-            <td>${belge.vat_amount || ""}</td>
-            <td>${belge.total_amount || ""}</td>
-            <td>${belge.vendor_name || ""}</td>
-            <td>
-                <button class="btn btn-sm btn-outline-info" onclick="belgeyeSoruSor('${belge.file_name}')">Soru Sor</button>
-            </td>
-        </tr>`;
-    }
-}
-
-document.addEventListener("DOMContentLoaded", guncelleDosyaListesi);
-
-function belgeyeSoruSor(filename) {
-    document.getElementById("sorguInput").value = `${filename} dosyasına sor: `;
-    document.getElementById("sorguInput").focus();
-}
-
-document.getElementById("sorgulaBtn").onclick = async function() {
-    const q = document.getElementById("sorguInput").value.trim();
-    if (!q) return;
-    try {
-        const resp = await fetch("/ask", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ question: q })
+    // Kayıtları çek ve tabloyu doldur
+    async function loadRecords() {
+        let resp = await fetch("/records");
+        let data = await resp.json();
+        recordsTable.innerHTML = "";
+        (data.records || []).forEach(r => {
+            recordsTable.innerHTML += `
+                <tr>
+                    <td>${r.file_name}</td>
+                    <td>${r.uploaded_at || ''}</td>
+                    <td>${r.vat_amount}</td>
+                    <td>${r.total_amount}</td>
+                    <td>
+                        <a href="${r.blob_url || '#'}" target="_blank">İndir</a>
+                    </td>
+                </tr>
+            `;
         });
-        const data = await resp.json();
-        document.getElementById("cevapAlani").style.display = "block";
-        document.getElementById("cevapAlani").innerHTML = `<b>Cevap:</b><br>${data.answer || JSON.stringify(data)}`;
-        showToast("Sorgu tamamlandı.", "bg-primary");
-    } catch (err) {
-        document.getElementById("cevapAlani").style.display = "block";
-        document.getElementById("cevapAlani").innerHTML = "Sorgulama sırasında hata oluştu.";
     }
-};
+    loadRecords();
+});
 </script>
 </body>
 </html>
