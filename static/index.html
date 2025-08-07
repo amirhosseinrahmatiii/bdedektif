@@ -1,223 +1,120 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-    <meta charset="UTF-8" />
-    <title>BelgeDedektif</title>
+    <meta charset="UTF-8">
+    <title>Belge Dedektif</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { font-family: Arial, sans-serif; }
-        #summaryPanel { position: fixed; bottom: 10px; left: 10px; border: 1px solid #ccc; padding: 8px; background: #f9f9f9; font-size: 0.9em; }
-        table { border-collapse: collapse; margin-top: 20px; width: 100%; max-width: 800px; }
-        th, td { border: 1px solid #ccc; padding: 5px; text-align: left; }
-        th { background: #eee; }
-        .action-btn { cursor: pointer; color: blue; text-decoration: underline; }
+        body { background: #f7f7fa; }
+        .thumb { max-width: 80px; max-height: 80px; }
+        .table td, .table th { vertical-align: middle; }
+        .summary-box { background: #fff3cd; border-radius:8px; padding:20px; margin-bottom:20px; }
     </style>
 </head>
 <body>
-    <h1>BelgeDedektif'e Hoşgeldiniz!</h1>
-    <input type="file" id="fileInput" multiple />
-    <button id="uploadBtn">Yükle &amp; Analiz Et</button>
+<div class="container my-4">
+    <h2 class="mb-4">BelgeDedektif’e Hoşgeldiniz!</h2>
 
-    <table id="recordsTable">
-        <thead>
-            <tr>
-                <th>Dosya Adı</th>
-                <th>Tutar</th>
-                <th>KDV</th>
-                <th>Firma/Kişi</th>
-                <th>İşlemler</th>
-            </tr>
-        </thead>
-        <tbody>
-            <!-- Records will be populated here -->
-        </tbody>
-    </table>
+    <!-- Dosya Yükleme Formu -->
+    <form id="uploadForm" enctype="multipart/form-data" class="mb-4">
+        <div class="input-group">
+            <input type="file" id="files" name="files" multiple class="form-control" accept=".pdf,.docx,.txt,.jpg,.jpeg,.png" required>
+            <button type="submit" class="btn btn-primary">Yükle & Analiz Et</button>
+        </div>
+    </form>
+    <div id="uploadResult"></div>
 
-    <div id="summaryPanel">
-        <div><strong>Bu Ayki Toplam Fiş Tutarı:</strong> <span id="sumTotal">0</span> TL</div>
-        <div><strong>Bu Ayki Toplam KDV:</strong> <span id="sumVAT">0</span> TL</div>
-        <div><strong>Bu Ay En Çok Fiş Kesilenler:</strong></div>
-        <ul id="topVendorsList"></ul>
+    <!-- Özet Kutu -->
+    <div id="summary" class="summary-box">
+        <b>Yüklenen Belge Sayısı:</b> <span id="count">0</span> |
+        <b>KDV Toplamı:</b> <span id="kdv_total">-</span> |
+        <b>Toplam Tutar:</b> <span id="sum_total">-</span> |
+        <b>En Çok Fiş Kesilen Firma:</b> <span id="top_firma">-</span>
     </div>
 
-    <input type="file" id="updateFileInput" style="display:none;" />
+    <!-- Son Yüklenen Belgeler Tablosu -->
+    <div class="table-responsive">
+        <table class="table table-bordered align-middle" id="docsTable">
+            <thead class="table-light">
+                <tr>
+                    <th>Görsel</th>
+                    <th>Dosya</th>
+                    <th>Tarih</th>
+                    <th>KDV</th>
+                    <th>Toplam</th>
+                    <th>İşlem</th>
+                </tr>
+            </thead>
+            <tbody id="docsBody">
+            <!-- JS ile doldurulacak -->
+            </tbody>
+        </table>
+    </div>
+</div>
+<script>
+// --- Dosya yükle ---
+document.getElementById('uploadForm').onsubmit = async function(e) {
+    e.preventDefault();
+    const form = e.target;
+    const data = new FormData(form);
+    document.getElementById('uploadResult').innerHTML = "Yükleniyor...";
+    const r = await fetch('/upload-analyze', {method:'POST', body:data});
+    const res = await r.json();
+    if (res && res.results) {
+        document.getElementById('uploadResult').innerHTML = "Yükleme başarılı!";
+        updateTable(res.results, true);
+    } else {
+        document.getElementById('uploadResult').innerHTML = "Hata: " + (res.error || "Bilinmeyen hata");
+    }
+};
 
-    <script>
-        document.getElementById('uploadBtn').addEventListener('click', function() {
-            const fileInput = document.getElementById('fileInput');
-            const files = fileInput.files;
-            if (!files.length) {
-                alert('Lütfen en az bir dosya seçin.');
-                return;
-            }
-            const formData = new FormData();
-            for (let i = 0; i < files.length; i++) {
-                formData.append('files', files[i]);
-            }
-            fetch('/upload-analyze', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                console.log(data);
-                if (data.results) {
-                    data.results.forEach(res => {
-                        addRecordToTable(res);
-                    });
-                }
-                refreshSummary();
-            })
-            .catch(err => {
-                console.error('Upload error', err);
-                alert('Dosyalar yüklenirken bir hata oluştu.');
-            });
-        });
-
-        function addRecordToTable(record) {
-            const tbody = document.querySelector('#recordsTable tbody');
-            const tr = document.createElement('tr');
-            tr.setAttribute('data-id', record.id);
-            // Dosya adı (indirilebilir link olarak)
-            const fileNameTd = document.createElement('td');
-            const downloadLink = document.createElement('a');
-            downloadLink.href = '/download?id=' + record.id;
-            downloadLink.textContent = record.file_name;
-            downloadLink.target = '_blank';
-            fileNameTd.appendChild(downloadLink);
-            tr.appendChild(fileNameTd);
-            // Tutar
-            const totalTd = document.createElement('td');
-            totalTd.textContent = (record.total_amount ?? 0).toFixed(2);
-            tr.appendChild(totalTd);
-            // KDV
-            const vatTd = document.createElement('td');
-            vatTd.textContent = (record.vat_amount ?? 0).toFixed(2);
-            tr.appendChild(vatTd);
-            // Firma/Kişi (satıcı)
-            const vendorTd = document.createElement('td');
-            vendorTd.textContent = record.vendor_name || (record.status === 'error' ? 'OCR Başarısız' : '');
-            tr.appendChild(vendorTd);
-            // İşlemler (Sil/Güncelle)
-            const actionsTd = document.createElement('td');
-            // Sil
-            const delLink = document.createElement('span');
-            delLink.textContent = 'Sil';
-            delLink.className = 'action-btn';
-            delLink.addEventListener('click', function() {
-                deleteRecord(record.id, tr);
-            });
-            actionsTd.appendChild(delLink);
-            actionsTd.appendChild(document.createTextNode(' | '));
-            // Güncelle
-            const updLink = document.createElement('span');
-            updLink.textContent = 'Güncelle';
-            updLink.className = 'action-btn';
-            updLink.addEventListener('click', function() {
-                currentUpdateId = record.id;
-                document.getElementById('updateFileInput').click();
-            });
-            actionsTd.appendChild(updLink);
-            tr.appendChild(actionsTd);
-            tbody.appendChild(tr);
+// --- Tabloyu güncelle ---
+let allDocs = [];
+function updateTable(newDocs, append=false) {
+    if (!append) allDocs = [];
+    allDocs = allDocs.concat(newDocs);
+    const tbody = document.getElementById('docsBody');
+    tbody.innerHTML = "";
+    let kdv_total = 0, sum_total = 0, top_firmas = {}, maxFirma = "-";
+    for (const doc of allDocs) {
+        // Basit KDV ve Toplam bulucu (demo)
+        let kdv = doc.kdv || "-", toplam = doc.toplam || "-";
+        // (Yapay zeka/analiz ile doldurulacak)
+        // Firma ismi demo
+        let firma = doc.firma || "-";
+        if (firma != "-") {
+            top_firmas[firma] = (top_firmas[firma] || 0) + 1;
+            if (top_firmas[firma] > (top_firmas[maxFirma]||0)) maxFirma = firma;
         }
-
-        // Kayıt silme işlevi
-        function deleteRecord(id, rowElement) {
-            if (!confirm('Bu kaydı silmek istediğinizden emin misiniz?')) {
-                return;
-            }
-            fetch('/delete?id=' + id, { method: 'DELETE' })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Silme işlemi başarısız');
-                }
-                return response.json();
-            })
-            .then(data => {
-                // Tablo satırını kaldır
-                rowElement.remove();
-                // Özeti güncelle
-                refreshSummary();
-            })
-            .catch(err => {
-                console.error('Delete error', err);
-                alert('Silme işlemi sırasında bir hata oluştu.');
-            });
-        }
-
-        // Kayıt güncelleme işlevi
-        let currentUpdateId = null;
-        document.getElementById('updateFileInput').addEventListener('change', function() {
-            if (!currentUpdateId || !this.files.length) return;
-            const formData = new FormData();
-            formData.append('file', this.files[0]);
-            fetch('/update?id=' + currentUpdateId, {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                // İlgili satırı güncelle
-                const row = document.querySelector('#recordsTable tbody tr[data-id="' + currentUpdateId + '"]');
-                if (row) {
-                    row.querySelector('td:nth-child(1) a').textContent = data.file_name;
-                    row.querySelector('td:nth-child(1) a').href = '/download?id=' + data.id;
-                    row.querySelector('td:nth-child(2)').textContent = (data.total_amount ?? 0).toFixed(2);
-                    row.querySelector('td:nth-child(3)').textContent = (data.vat_amount ?? 0).toFixed(2);
-                    row.querySelector('td:nth-child(4)').textContent = data.vendor_name || (data.status === 'error' ? 'OCR Başarısız' : '');
-                }
-                // Dosya input'unu sıfırla
-                document.getElementById('updateFileInput').value = '';
-                currentUpdateId = null;
-                // Özeti güncelle
-                refreshSummary();
-            })
-            .catch(err => {
-                console.error('Update error', err);
-                alert('Güncelleme sırasında bir hata oluştu.');
-            });
-        });
-
-        // Aylık özet panelini güncelleme
-        function refreshSummary() {
-            fetch('/summary')
-            .then(response => response.json())
-            .then(data => {
-                document.getElementById('sumTotal').textContent = data.total_sum_month.toFixed(2);
-                document.getElementById('sumVAT').textContent = data.total_vat_month.toFixed(2);
-                const topList = document.getElementById('topVendorsList');
-                topList.innerHTML = '';
-                data.top_vendors_month.forEach(item => {
-                    const li = document.createElement('li');
-                    let name = item.vendor;
-                    if (!name || name.trim() === '') {
-                        name = 'Bilinmeyen';
-                    }
-                    li.textContent = name + ' - ' + item.count + ' fiş';
-                    topList.appendChild(li);
-                });
-            })
-            .catch(err => {
-                console.error('Summary fetch error', err);
-            });
-        }
-
-        // Sayfa yüklendiğinde mevcut kayıtları ve özeti getir
-        window.onload = function() {
-            // Kayıtları getir
-            fetch('/records')
-            .then(response => response.json())
-            .then(data => {
-                if (data.records) {
-                    data.records.forEach(rec => {
-                        addRecordToTable(rec);
-                    });
-                }
-            })
-            .catch(err => console.error('Records fetch error', err));
-            // Özet verisini getir
-            refreshSummary();
-        };
-    </script>
+        // Thumbnail ekle
+        let thumb = doc.blob_url && doc.file_type.match(/(jpg|jpeg|png)/i)
+            ? `<img src="${doc.blob_url}" class="thumb">`
+            : "-";
+        tbody.innerHTML += `<tr>
+            <td>${thumb}</td>
+            <td>${doc.filename}</td>
+            <td>${doc.upload_timestamp || "-"}</td>
+            <td>${kdv}</td>
+            <td>${toplam}</td>
+            <td>
+                ${doc.blob_url ? `<a href="${doc.blob_url}" target="_blank">Görüntüle</a> | ` : ""}
+                <a href="#" onclick="deleteDoc('${doc.filename}');return false;">Sil</a> | 
+                <a href="#" onclick="askAI('${doc.filename}');return false;">Soru Sor</a>
+            </td>
+        </tr>`;
+    }
+    document.getElementById('count').innerText = allDocs.length;
+    document.getElementById('kdv_total').innerText = kdv_total || "-";
+    document.getElementById('sum_total').innerText = sum_total || "-";
+    document.getElementById('top_firma').innerText = maxFirma;
+}
+// Demo: Sayfa açılır açılmaz API'den tüm belgeleri çekmek
+window.onload = async function() {
+    // Şu anlık backend'de kayıt yok, yükleme sonrası tablo dolacak.
+};
+function deleteDoc(filename) { alert('Silme fonksiyonu (API güncellemesi gerekir)'); }
+function askAI(filename) { alert('AI Fonksiyonu (API güncellemesi gerekir)'); }
+</script>
 </body>
 </html>
