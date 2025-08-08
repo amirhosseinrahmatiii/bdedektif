@@ -11,7 +11,7 @@ app.add_middleware(
 )
 
 # SQL bağlantı ayarlarını DÜZENLE
-SQL_CONN_STR = "Driver={ODBC Driver 17 for SQL Server};Server=bdedeksql1754383472.database.windows.net;Database=belgededektifdb;Uid=sqladmin;Pwd=SeninParolan;Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;"
+SQL_CONN_STR = "Driver={ODBC Driver 17 for SQL Server};Server=bdedeksql1754383472.database.windows.net;Database=belgededektifdb;Uid=sqladmin;Pwd=Kav1234!;Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;"
 
 class GlobalQuestion(BaseModel):
     question: str
