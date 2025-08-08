@@ -4,73 +4,118 @@
     <meta charset="UTF-8">
     <title>Belge Dedektif – Fatura/Fiş Analiz Platformu</title>
     <style>
-        body { font-family: Arial; margin: 2rem; background: #f5f7fa; }
-        h2 { color: #2a71d0 }
-        table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
-        th, td { border: 1px solid #b6b6b6; padding: 7px; text-align: left; }
-        th { background: #d7e8fa; }
-        .success { color: green; }
-        .fail { color: red; }
+        body { font-family: Arial, sans-serif; background: #f7f8fa; margin: 0; padding: 0; }
+        .container { max-width: 1100px; margin: 30px auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 18px #e5e5e5; padding: 32px; }
+        h1 { color: #233878; }
+        table { border-collapse: collapse; width: 100%; margin-top: 24px; }
+        th, td { border: 1px solid #eee; padding: 10px; text-align: left; }
+        th { background: #f0f3fa; }
+        tr:nth-child(even) { background: #fafcff; }
+        .analiz-alani { margin-bottom: 22px; }
+        #globalAnswer { color: #246e1a; font-weight: bold; margin-top: 8px; min-height: 20px; }
+        .file-upload { margin-bottom: 16px; }
     </style>
 </head>
 <body>
-    <h2>Belge Dedektif – Fatura/Fiş Analiz Platformu</h2>
-    <input type="file" id="fileInput">
-    <button onclick="uploadFile()">Yükle & Analiz Et</button>
-    <p id="status"></p>
-    <hr>
-    <h3>Yüklenen Belgeler</h3>
-    <table>
-        <thead>
-            <tr>
-                <th>Ad</th>
-                <th>Tarih</th>
-                <th>Firma</th>
-                <th>KDV</th>
-                <th>Toplam</th>
-                <th>OCR</th>
-                <th>İndir</th>
-            </tr>
-        </thead>
-        <tbody id="recordsTable"></tbody>
-    </table>
-<script>
-async function uploadFile() {
-    let fileInput = document.getElementById('fileInput');
-    if (!fileInput.files.length) return alert("Dosya seçin!");
-    let file = fileInput.files[0];
-    let formData = new FormData();
-    formData.append("file", file);
+    <div class="container">
+        <h1>Belge Dedektif – Fatura/Fiş Analiz Platformu</h1>
+        
+        <!-- Genel Soru Sorma Alanı -->
+        <div class="analiz-alani">
+            <input id="globalQuestion" type="text" placeholder="Bir analiz sorusu yazın (ör: Bu ay toplam KDV ne kadar?)" style="width:350px; padding: 7px; border-radius: 6px; border: 1px solid #ccc;">
+            <button onclick="askGlobal()" style="padding: 7px 18px; border-radius: 6px; background: #3767c6; color: #fff; border: none;">Sor</button>
+            <div id="globalAnswer"></div>
+        </div>
+        
+        <!-- Dosya Yükleme -->
+        <div class="file-upload">
+            <form id="uploadForm" enctype="multipart/form-data">
+                <input type="file" name="file" id="fileInput">
+                <button type="submit" style="margin-left:12px; padding:6px 16px;">Yükle & Analiz Et</button>
+            </form>
+            <span id="uploadStatus"></span>
+        </div>
+        
+        <!-- Belgeler Tablosu -->
+        <h3>Yüklenen Belgeler</h3>
+        <table id="docsTable">
+            <thead>
+                <tr>
+                    <th>Ad</th>
+                    <th>Tarih</th>
+                    <th>Firma</th>
+                    <th>KDV</th>
+                    <th>Toplam</th>
+                    <th>OCR</th>
+                    <th>İndir</th>
+                </tr>
+            </thead>
+            <tbody id="docsBody"></tbody>
+        </table>
+    </div>
+    
+    <script>
+        // --- Soru Sor ---
+        function askGlobal() {
+            const q = document.getElementById('globalQuestion').value.trim();
+            document.getElementById('globalAnswer').innerText = "Sorunuz işleniyor...";
+            if (!q) return document.getElementById('globalAnswer').innerText = "Lütfen bir soru girin.";
+            fetch('/ask-global', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ question: q })
+            })
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('globalAnswer').innerText = data.answer || "Yanıt üretilemedi.";
+            })
+            .catch(() => document.getElementById('globalAnswer').innerText = "Sunucuya ulaşılamadı.");
+        }
 
-    document.getElementById('status').innerText = "Yükleniyor...";
-    let res = await fetch('/upload-analyze', { method: 'POST', body: formData });
-    let data = await res.json();
-    if (data.success) {
-        document.getElementById('status').innerHTML = `<span class="success">Başarılı! OCR: <br>${data.ocr.slice(0,250)}...</span>`;
-        loadRecords();
-    } else {
-        document.getElementById('status').innerHTML = `<span class="fail">Hata: ${data.error}</span>`;
-    }
-}
+        // --- Belgeleri Listele ---
+        function loadDocs() {
+            fetch('/list-docs')
+            .then(r => r.json())
+            .then(data => {
+                const tbody = document.getElementById('docsBody');
+                tbody.innerHTML = '';
+                if (data.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">Hiç belge bulunamadı.</td></tr>`;
+                } else {
+                    data.forEach(row => {
+                        tbody.innerHTML += `
+                            <tr>
+                                <td>${row.Ad || '-'}</td>
+                                <td>${row.Tarih || '-'}</td>
+                                <td>${row.Firma || '-'}</td>
+                                <td>${row.KDV || '-'}</td>
+                                <td>${row.Toplam || '-'}</td>
+                                <td style="max-width:160px; white-space:nowrap; overflow-x:auto;">${row.OCR ? row.OCR.slice(0,60) + (row.OCR.length > 60 ? "..." : "") : '-'}</td>
+                                <td>${row.BlobURL ? `<a href="${row.BlobURL}" target="_blank">indir</a>` : '-'}</td>
+                            </tr>
+                        `;
+                    });
+                }
+            });
+        }
+        loadDocs();
 
-async function loadRecords() {
-    let res = await fetch('/records');
-    let data = await res.json();
-    let html = "";
-    data.records.forEach(r => {
-        html += `<tr>
-            <td>${r.Ad}</td>
-            <td>${r.Tarih}</td>
-            <td>${r.Firma}</td>
-            <td>${r.KDV}</td>
-            <td>${r.Toplam}</td>
-            <td>${r.OCR.slice(0, 80)}...</td>
-            <td><a href="${r.BlobURL}" target="_blank">İndir</a></td>
-        </tr>`;
-    });
-    document.getElementById('recordsTable').innerHTML = html;
-}
-window.onload = loadRecords;
-</script>
+        // --- Dosya Yükle ---
+        document.getElementById('uploadForm').onsubmit = function(e) {
+            e.preventDefault();
+            const f = document.getElementById('fileInput').files[0];
+            if (!f) return alert('Dosya seçiniz');
+            const fd = new FormData();
+            fd.append('file', f);
+            document.getElementById('uploadStatus').innerText = "Yükleniyor...";
+            fetch('/upload', { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(res => {
+                    document.getElementById('uploadStatus').innerText = res.message || "";
+                    loadDocs();
+                })
+                .catch(() => document.getElementById('uploadStatus').innerText = "Sunucu hatası!");
+        }
+    </script>
 </body>
 </html>
