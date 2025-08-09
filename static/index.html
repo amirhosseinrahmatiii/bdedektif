@@ -40,36 +40,25 @@
                 return;
             }
 
-            resultText.textContent = '⏳ Dosya yükleniyor...';
+            resultText.textContent = '⏳ Dosya yükleniyor ve yapay zeka ile analiz ediliyor, lütfen bekleyin...';
             statusDiv.style.display = 'block';
 
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
 
             try {
-                // Adım 1: Dosyayı /upload endpoint'ine gönder
-                const uploadResponse = await fetch('/upload', {
+                const response = await fetch('/upload-and-analyze', {
                     method: 'POST',
                     body: formData
                 });
-                const uploadData = await uploadResponse.json();
-
-                if (!uploadResponse.ok) {
-                    throw new Error(uploadData.detail || 'Dosya yüklenemedi.');
-                }
-
-                const blobName = uploadData.blob_name;
-                resultText.textContent = '✅ Dosya yüklendi.\n⏳ Şimdi yapay zeka ile analiz ediliyor...';
-
-                // Adım 2: /analyze endpoint'i ile analiz et
-                const analyzeResponse = await fetch(`/analyze/${blobName}`);
-                const analyzeData = await analyzeResponse.json();
                 
-                if (!analyzeResponse.ok) {
-                    throw new Error(analyzeData.detail || 'Analiz başarısız oldu.');
-                }
+                const data = await response.json();
 
-                resultText.textContent = '✅ Analiz Tamamlandı!\n\n--- Okunan Metin ---\n' + analyzeData.text;
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Bilinmeyen bir sunucu hatası oluştu.');
+                }
+                
+                resultText.textContent = '✅ Analiz Tamamlandı!\n\n--- Okunan Metin ---\n' + data.text;
 
             } catch (error) {
                 resultText.textContent = '❌ Bir hata oluştu: ' + error.message;
