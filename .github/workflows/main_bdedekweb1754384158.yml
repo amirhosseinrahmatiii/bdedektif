@@ -1,8 +1,6 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
-# More GitHub Actions for Azure: https://github.com/Azure/actions
-# More info on Python, GitHub Actions, and Azure App Service: https://aka.ms/python-webapps-actions
+# .github/workflows/main_bdedekweb1754384158.yml
 
-name: Build and deploy Python app to Azure Web App - bdedekweb1754384158
+name: Build and Deploy Docker App to Azure Web App
 
 on:
   push:
@@ -13,59 +11,38 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read #This is required for actions/checkout
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python version
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Create and start virtual environment
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_SECRET_NAME }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_SECRET_NAME }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_SECRET_NAME }}
+
+      - name: Build and push Docker image
         run: |
-          python -m venv venv
-          source venv/bin/activate
-      
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-        
-      # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
-
-      - name: Upload artifact for deployment jobs
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-app
-          path: |
-            .
-            !venv/
+          docker build . -t ${{ secrets.AZURE_WEBAPP_NAME }}.azurecr.io/bdedektif:${{ github.sha }}
+          docker push ${{ secrets.AZURE_WEBAPP_NAME }}.azurecr.io/bdedektif:${{ github.sha }}
+        env:
+          AZURE_WEBAPP_NAME: bdedekweb1754384158
 
   deploy:
     runs-on: ubuntu-latest
     needs: build
-    permissions:
-      id-token: write #This is required for requesting the JWT
-      contents: read #This is required for actions/checkout
-
+    environment:
+      name: 'Production'
+      url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
+    
     steps:
-      - name: Download artifact from build job
-        uses: actions/download-artifact@v4
-        with:
-          name: python-app
-      
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_345D963874B5423FAB17405D249F5C60 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_9B1E214AF1954A06858C78E0509547A6 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_06352EDBB1F04328A6FB34195326486B }}
-
       - name: 'Deploy to Azure Web App'
-        uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
+        uses: azure/webapps-deploy@v3
         with:
           app-name: 'bdedekweb1754384158'
-          slot-name: 'Production'
-          
+          images: '${{ secrets.AZURE_WEBAPP_NAME }}.azurecr.io/bdedektif:${{ github.sha }}'
