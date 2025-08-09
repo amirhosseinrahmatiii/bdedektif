@@ -1,8 +1,8 @@
 fastapi
 uvicorn
-pydantic
+gunicorn
 python-dotenv
 pyodbc
 azure-storage-blob
 azure-ai-vision-imageanalysis
-gunicorn
+pydantic
