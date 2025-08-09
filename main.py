@@ -26,6 +26,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # --- Azure Servis İstemcileri ---
 def get_azure_clients():
+    """Azure servis istemcilerini ortam değişkenlerinden başlatır."""
     try:
         connect_str = os.environ['AZURE_STORAGE_CONNECTION_STRING']
         container_name = os.environ['AZURE_CONTAINER_NAME']
@@ -37,11 +38,11 @@ def get_azure_clients():
         
         return blob_service_client, container_name, vision_client
     except KeyError as e:
-        # Azure'da bu hata olmamalı, çünkü ayarları oraya girdik.
         raise HTTPException(status_code=500, detail=f"Sunucu yapılandırma hatası: {e} ortam değişkeni eksik.")
 
 # --- Veritabanı Bağlantısı ---
 def get_db_connection():
+    """Veritabanı bağlantısını kurar ve döndürür."""
     try:
         conn_str = (
             f"DRIVER={{ODBC Driver 17 for SQL Server}};"
