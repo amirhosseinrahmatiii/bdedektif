@@ -1,5 +1,5 @@
 fastapi
-uvicorn
+uvicorn[standard]
 gunicorn
 python-dotenv
 pyodbc
@@ -7,5 +7,4 @@ azure-storage-blob
 azure-ai-vision-imageanalysis
 pydantic
 python-multipart
-uvicorn[standard]
 azure-identity
