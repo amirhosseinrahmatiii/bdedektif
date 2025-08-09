@@ -1,126 +1,124 @@
 import os
 import datetime
-from typing import List, Any, Dict
-
+import uuid
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
+from azure.storage.blob import BlobServiceClient
+from azure.core.credentials import AzureKeyCredential
+from azure.ai.vision.imageanalysis import ImageAnalysisClient
+from azure.ai.vision.imageanalysis.models import VisualFeatures
 import pyodbc
-from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
-APP_NAME = "BelgeDedektif API"
-APP_VERSION = "0.1.0"
-
-app = FastAPI(title=APP_NAME, version=APP_VERSION)
-
-# --- CORS ---
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+# --- Uygulama Başlangıcı ve Yapılandırma ---
+app = FastAPI(
+    title="BelgeDedektif API",
+    description="Belgeleri yapay zeka ile analiz edip yöneten API.",
+    version="1.0.0"
 )
 
-# --- SQL Bağlantısı ---
-def _build_sql_conn_str() -> str:
-    # Önce doğrudan connection string var mı bak
-    direct = os.getenv("SQL_CONN_STR")
-    if direct:
-        return direct
+# Static dosyaları (index.html, css, js) sunmak için
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-    # Yoksa parçalı env değişkenlerinden oluştur
-    server = os.getenv("SQL_SERVER", "bdedeksql1754383472.database.windows.net")
-    db = os.getenv("SQL_DB", "belgededektifdb")
-    user = os.getenv("SQL_USER", "sqladmin")
-    pwd = os.getenv("SQL_PASSWORD", "Kav12345!")  # ENV'den gelmezse bu varsayılanı kullanır
-    return (
-        "Driver={ODBC Driver 17 for SQL Server};"
-        f"Server={server};Database={db};Uid={user};Pwd={pwd};"
-        "Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;"
-    )
+# --- Azure Servis Bağlantıları ---
 
-SQL_CONN_STR = _build_sql_conn_str()
+# 1. Blob Storage İstemcisi
+try:
+    connect_str = os.environ['AZURE_STORAGE_CONNECTION_STRING']
+    blob_service_client = BlobServiceClient.from_connection_string(connect_str)
+    container_name = os.environ['AZURE_CONTAINER_NAME']
+except KeyError as e:
+    print(f"HATA: Gerekli ortam değişkeni bulunamadı: {e}")
+    blob_service_client = None
+    container_name = None
 
-def get_conn():
-    return pyodbc.connect(SQL_CONN_STR)
+# 2. Azure AI Vision (OCR) İstemcisi
+try:
+    vision_endpoint = os.environ['AZURE_OCR_ENDPOINT']
+    vision_key = os.environ['AZURE_OCR_KEY']
+    vision_client = ImageAnalysisClient(endpoint=vision_endpoint, credential=AzureKeyCredential(vision_key))
+except KeyError as e:
+    print(f"HATA: Gerekli AI Vision ortam değişkeni bulunamadı: {e}")
+    vision_client = None
 
-# --- Modeller ---
-class GlobalQuestion(BaseModel):
-    question: str
+# 3. SQL Veritabanı Bağlantısı
+def get_db_connection():
+    try:
+        conn_str = (
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={os.environ['SQL_SERVER']};"
+            f"DATABASE={os.environ['SQL_DB']};"
+            f"UID={os.environ['SQL_USER']};"
+            f"PWD={os.environ['SQL_PASSWORD']}"
+        )
+        conn = pyodbc.connect(conn_str)
+        return conn
+    except Exception as e:
+        print(f"Veritabanı bağlantı hatası: {e}")
+        raise HTTPException(status_code=500, detail="Veritabanı bağlantısı kurulamadı.")
 
-# --- Kök & Sağlık ---
-@app.get("/")
-def root():
-    return {"status": "ok", "service": APP_NAME, "version": APP_VERSION}
+# --- API Endpoint'leri ---
+
+@app.get("/", response_class=FileResponse)
+async def read_index():
+    """Uygulamanın ana HTML sayfasını sunar."""
+    return "static/index.html"
+
+@app.post("/upload-and-analyze")
+async def upload_and_analyze_document(file: UploadFile = File(...)):
+    """
+    Belgeyi alır, Blob Storage'a yükler, AI ile analiz eder,
+    sonuçları veritabanına kaydeder ve okunan metni döndürür.
+    """
+    if not all([blob_service_client, vision_client, container_name]):
+        raise HTTPException(status_code=500, detail="Azure servis yapılandırması eksik.")
+
+    try:
+        # 1. Dosyayı Blob Storage'a Yükle
+        file_extension = os.path.splitext(file.filename)[1]
+        blob_name = f"doc-{uuid.uuid4()}{file_extension}"
+        
+        blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
+        
+        contents = await file.read()
+        blob_client.upload_blob(contents, overwrite=True)
+        blob_url = blob_client.url
+
+        # 2. AI Vision ile Metinleri Oku (OCR)
+        result = vision_client.analyze(image_url=blob_url, visual_features=[VisualFeatures.READ])
+        
+        ocr_text = ""
+        if result.read is not None and result.read.blocks:
+            ocr_text = "\n".join([line.text for block in result.read.blocks for line in block.lines])
+
+        # 3. Sonuçları Veritabanına Kaydet
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO dbo.Belgeler (Ad, Tarih, Firma, OCR, BlobURL) VALUES (?, ?, ?, ?, ?)",
+            file.filename,
+            datetime.date.today(),
+            "Bilinmiyor", # Bu alan daha sonra AI ile doldurulabilir
+            ocr_text,
+            blob_url
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return {"message": "Belge başarıyla analiz edildi.", "text": ocr_text, "blob_url": blob_url}
+
+    except Exception as e:
+        print(f"İşlem sırasında hata: {e}")
+        raise HTTPException(status_code=500, detail=f"İşlem sırasında bir hata oluştu: {str(e)}")
 
 @app.get("/health")
-def health():
+def health_check():
+    """Servislerin sağlık durumunu kontrol eder."""
     try:
-        with get_conn() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1")
-            cursor.fetchone()
-        return {"status": "healthy"}
-    except Exception as ex:
-        return JSONResponse(status_code=500, content={"status": "unhealthy", "error": str(ex)})
-
-# --- Soru-Cevap (örnek) ---
-@app.post("/ask-global")
-async def ask_global(q: GlobalQuestion):
-    try:
-        with get_conn() as conn:
-            cursor = conn.cursor()
-            qlower = q.question.lower()
-
-            # Toplam KDV
-            if "toplam kdv" in qlower or ("kdv" in qlower and "toplam" in qlower):
-                cursor.execute("""
-                    SELECT SUM(TRY_CONVERT(decimal(18,2), KDV))
-                    FROM dbo.Belgeler
-                """)
-                result = cursor.fetchone()[0]
-                return {"answer": f"Toplam KDV: {result:.2f} ₺"} if result is not None else {"answer": "Toplam KDV verisi yok."}
-
-            # Bu ay toplam
-            if "bu ay" in qlower and "toplam" in qlower:
-                ay = datetime.datetime.now().strftime("%Y-%m")
-                cursor.execute("""
-                    SELECT SUM(TRY_CONVERT(decimal(18,2), Toplam))
-                    FROM dbo.Belgeler
-                    WHERE CONVERT(varchar(7), TRY_CONVERT(date, Tarih), 23) = ?
-                """, ay)
-                result = cursor.fetchone()[0]
-                return {"answer": f"Bu ay toplam harcamanız: {result:.2f} ₺"} if result is not None else {"answer": "Bu aya ait harcama verisi yok."}
-
-        return {"answer": "Şu an bu soruya otomatik yanıt verilemiyor."}
-    except Exception as ex:
-        return {"answer": f"Hata oluştu: {ex}"}
-
-# --- Belge Listeleme ---
-@app.get("/list-docs")
-def list_docs():
-    try:
-        with get_conn() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT Id, Ad, Tarih, Firma, KDV, Toplam, OCR, BlobURL
-                FROM dbo.Belgeler
-                ORDER BY Id DESC
-            """)
-            rows = cursor.fetchall()
-            cols = [c[0] for c in cursor.description]
-            data: List[Dict[str, Any]] = [dict(zip(cols, row)) for row in rows]
-            return JSONResponse(content=data)
-    except Exception as ex:
-        return JSONResponse(status_code=500, content={"error": str(ex), "data": []})
-
-# --- Upload (demo) ---
-@app.post("/upload")
-async def upload(file: UploadFile = File(...)):
-    # Burada istersen Azure Blob'a kaydetme/AI OCR akışını ekleyebiliriz.
-    return {"message": f"{file.filename} başarıyla yüklendi (demo endpoint)"}
-
-# --- Lokal geliştirme için ---
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+        # Veritabanı bağlantısını test et
+        conn = get_db_connection()
+        conn.close()
+        return {"status": "ok", "database_connection": "successful"}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "database_connection": f"failed: {str(e)}"})
