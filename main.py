@@ -113,3 +113,4 @@ def get_documents():
         return docs
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Belgeler alınırken hata oluştu: {str(e)}")
+
