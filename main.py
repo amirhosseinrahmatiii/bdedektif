@@ -21,7 +21,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Static dosyaları (index.html) sunmak için
+# Static dosyaları (index.html, css, js) sunmak için
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # --- Azure Servis İstemcileri ---
@@ -44,6 +44,7 @@ def get_azure_clients():
 def get_db_connection():
     """Veritabanı bağlantısını kurar ve döndürür."""
     try:
+        # Not: Şifre gibi hassas bilgiler Azure App Service ayarlarından güvenli bir şekilde okunur.
         conn_str = (
             f"DRIVER={{ODBC Driver 17 for SQL Server}};"
             f"SERVER={os.environ['SQL_SERVER']};"
@@ -59,16 +60,18 @@ def get_db_connection():
 
 @app.get("/", response_class=FileResponse)
 async def serve_frontend():
-    """Ana HTML sayfasını sunar."""
+    """Kullanıcı arayüzünü (index.html) sunar."""
     return "static/index.html"
 
 @app.post("/api/upload-and-analyze")
 async def upload_and_analyze_document(file: UploadFile = File(...)):
-    """Belgeyi alır, yükler, analiz eder ve veritabanına kaydeder."""
+    """
+    İş Akışı Adım 2-3-4: Belgeyi alır, Blob'a yükler, AI ile analiz eder ve DB'ye kaydeder.
+    """
     blob_service_client, container_name, vision_client = get_azure_clients()
 
     try:
-        # 1. Blob Storage'a Yükle
+        # Adım 2: Belgeyi Azure Blob Storage'a yükle
         file_extension = os.path.splitext(file.filename)[1]
         blob_name = f"doc-{uuid.uuid4()}{file_extension}"
         blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
@@ -77,11 +80,11 @@ async def upload_and_analyze_document(file: UploadFile = File(...)):
         blob_client.upload_blob(contents, overwrite=True)
         blob_url = blob_client.url
 
-        # 2. AI Vision ile Analiz Et (OCR)
+        # Adım 3: Azure AI Vision ile belgeyi oku (OCR)
         result = vision_client.analyze(image_url=blob_url, visual_features=[VisualFeatures.READ])
-        ocr_text = "\n".join([line.text for block in result.read.blocks for line in block.lines]) if result.read else "Metin bulunamadı."
+        ocr_text = "\n".join([line.text for block in result.read.blocks for line in block.lines]) if result.read else "Bu belgede okunabilir metin bulunamadı."
 
-        # 3. Veritabanına Kaydet
+        # Adım 4: Analiz sonucunu veritabanına kaydet
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -94,3 +97,19 @@ async def upload_and_analyze_document(file: UploadFile = File(...)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/documents")
+def get_documents():
+    """İş Akışı Adım 5: Kayıtlı tüm belgeleri ve detaylarını listeler."""
+    docs = []
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT Id, Ad, Tarih, Firma, OCR, BlobURL FROM dbo.Belgeler ORDER BY Tarih DESC")
+            rows = cursor.fetchall()
+            columns = [column[0] for column in cursor.description]
+            for row in rows:
+                docs.append(dict(zip(columns, row)))
+        return docs
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Belgeler alınırken hata oluştu: {str(e)}")
