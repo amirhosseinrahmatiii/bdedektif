@@ -1,21 +1,23 @@
-# Dockerfile
-
-# 1. Adım: Temel Python imajını kullan
+# Python 3.10 tabanlı resmi imaj
 FROM python:3.10-slim
 
-# 2. Adım: Çalışma dizinini ayarla
+# Ortam değişkenleri
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PORT=8000
+
+# Çalışma dizini
 WORKDIR /app
 
-# 3. Adım: Bağımlılıkları kopyala ve kur
+# Bağımlılıkların önce yüklenmesi (cache için)
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# 4. Adım: Proje kodlarının tamamını kopyala
+# Uygulama kodunun kopyalanması
 COPY . .
 
-# 5. Adım: Uygulamanın çalışacağı portu belirt
-EXPOSE 8000
+# Port açma
+EXPOSE $PORT
 
-# 6. Adım: Uygulamayı başlatma komutu
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Uygulamayı çalıştırma
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "main:app", "--timeout", "600"]
