@@ -81,7 +81,10 @@ async def upload_and_analyze_document(file: UploadFile = File(...)):
         blob_url = blob_client.url
 
         # Adım 3: Azure AI Vision ile belgeyi oku (OCR)
-        result = vision_client.analyze(image_url=blob_url, visual_features=[VisualFeatures.READ])
+        result = vision_client.analyze_from_url(
+    image_url=blob_url,
+    visual_features=[VisualFeatures.READ]
+        )
         ocr_text = "\n".join([line.text for block in result.read.blocks for line in block.lines]) if result.read else "Bu belgede okunabilir metin bulunamadı."
 
         # Adım 4: Analiz sonucunu veritabanına kaydet
