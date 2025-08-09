@@ -1,15 +1,21 @@
-FROM mcr.microsoft.com/azure-functions/python:4-python3.10
+# Dockerfile
 
-RUN apt-get update && \
-    apt-get install -y unixodbc unixodbc-dev gcc g++ curl && \
-    curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - && \
-    curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list > /etc/apt/sources.list.d/mssql-release.list && \
-    apt-get update && \
-    ACCEPT_EULA=Y apt-get install -y msodbcsql18
+# 1. Adım: Temel Python imajını kullan
+FROM python:3.10-slim
 
-COPY requirements.txt /app/
+# 2. Adım: Çalışma dizinini ayarla
 WORKDIR /app
-RUN pip install --upgrade pip && pip install -r requirements.txt
-COPY . /app
 
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "main:app"]
+# 3. Adım: Bağımlılıkları kopyala ve kur
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# 4. Adım: Proje kodlarının tamamını kopyala
+COPY . .
+
+# 5. Adım: Uygulamanın çalışacağı portu belirt
+EXPOSE 8000
+
+# 6. Adım: Uygulamayı başlatma komutu
+CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--host", "0.0.0.0", "--port", "8000"]
