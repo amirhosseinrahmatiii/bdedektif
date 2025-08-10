@@ -1,16 +1,12 @@
 fastapi
-uvicorn[standard]
+uvicorn
 gunicorn
 python-dotenv
-pyodbc
 azure-storage-blob
-azure-ai-vision-imageanalysis==1.0.0
-pydantic
+requests
+pillow
+jinja2
+pyodbc
 python-multipart
-azure-identity
-azure-ai-vision-imageanalysis==1.0.0
-azure-core==1.30.2
-pyodbc==5.1.0
-requests==2.32.3
-jinja2==3.1.4
-pillow==10.4.0
+azure-core
+azure-ai-vision-imageanalysis @ git+https://github.com/Azure/azure-sdk-for-python.git#subdirectory=sdk/vision/azure-ai-vision-imageanalysis
