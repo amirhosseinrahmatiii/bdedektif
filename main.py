@@ -11,7 +11,7 @@ from io import BytesIO
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -344,10 +344,34 @@ def diagnostics():
     }
 
 
+# ---------- ÖN YÜZ SERVİSİ: static/index.html -> templates/index.html fallback ----------
 @app.get("/")
 async def serve_frontend(request: Request):
-    """Ana sayfa."""
-    return templates.TemplateResponse("index.html", {"request": request})
+    """
+    Önce static/index.html varsa onu döndürür,
+    yoksa templates/index.html Jinja ile render eder.
+    Cache kapalı döner ki değişiklik anında görünsün.
+    """
+    cache_headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0"
+    }
+
+    static_index = os.path.join("static", "index.html")
+    if os.path.exists(static_index):
+        return FileResponse(static_index, headers=cache_headers)
+
+    template_index = os.path.join("templates", "index.html")
+    if os.path.exists(template_index):
+        resp = templates.TemplateResponse("index.html", {"request": request})
+        for k, v in cache_headers.items():
+            resp.headers[k] = v
+        return resp
+
+    # Hiçbiri yoksa net hata ver
+    raise HTTPException(status_code=404, detail="Ön yüz bulunamadı: static/index.html veya templates/index.html eksik.")
+# ---------------------------------------------------------------------------------------
 
 
 @app.get("/api/health")
@@ -518,7 +542,7 @@ def delete_document(doc_id: str):
         raise HTTPException(status_code=500, detail=f"Belge silinirken hata: {str(e)}")
 
 
-# İstatistik endpoint'i (ana bloktan önce)
+# İstatistik endpoint'i
 @app.get("/api/stats")
 def get_stats():
     """Belgeler hakkında istatistik döndürür."""
@@ -551,7 +575,4 @@ def get_stats():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
-
-
-doğrumu
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), reload=True)
