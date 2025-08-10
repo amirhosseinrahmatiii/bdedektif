@@ -1,10 +1,12 @@
-fastapi
-uvicorn[standard]
-gunicorn
-python-dotenv
-pyodbc
-azure-storage-blob
-azure-ai-vision-imageanalysis
-pydantic
-python-multipart
-azure-identity
+fastapi>=0.110
+uvicorn[standard]>=0.22
+gunicorn>=21.2
+python-dotenv>=1.0
+pyodbc>=4.0.39
+azure-storage-blob>=12.19
+azure-core>=1.30
+azure-ai-vision-imageanalysis==1.0.0
+python-multipart>=0.0.9
+# opsiyonel: şu an kullanmıyoruz ama ileride MI için gerekebilir
+azure-identity>=1.17
+pydantic>=2.7
