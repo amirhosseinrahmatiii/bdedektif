@@ -2,86 +2,111 @@
 <html lang="tr">
 <head>
   <meta charset="utf-8" />
-  <title>BelgeDedektif</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Belge Dedektif – OCR Demo</title>
   <style>
-    body { font-family: system-ui, Arial, sans-serif; margin: 24px; }
-    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-    .btn { padding: 10px 16px; border-radius: 10px; border: 1px solid #999; cursor: pointer; background:#f7f7f7; }
-    .btn:hover { background:#eee; }
-    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
-    th, td { border:1px solid #ddd; padding:8px; font-size:14px; }
-    th { background:#fafafa; text-align:left; }
-    code { background:#f5f5f5; padding:2px 6px; border-radius:6px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu;max-width:900px;margin:40px auto;padding:0 16px}
+    .card{border:1px solid #e5e7eb;border-radius:16px;padding:16px;margin:12px 0;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+    .btn{padding:10px 14px;border-radius:10px;border:1px solid #d1d5db;background:#111;color:#fff;cursor:pointer}
+    .btn[disabled]{opacity:.6;cursor:not-allowed}
+    .muted{color:#6b7280}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+    .thumb{width:100%;height:140px;object-fit:cover;border-radius:10px;border:1px solid #e5e7eb}
+    textarea{width:100%;min-height:120px}
   </style>
 </head>
 <body>
-  <h1>BelgeDedektif</h1>
+  <h1>Belge Dedektif</h1>
+  <p class="muted">Görsel yükle, OCR yap ve kayıtlı belgeleri listele.</p>
 
   <div class="card">
-    <h3>Belge Yükle & OCR</h3>
-    <div class="row">
-      <input id="file" type="file" accept="image/*" />
-      <button class="btn" id="uploadBtn">Yükle & Analiz Et</button>
+    <h2>1) Görsel Yükle ve Tara</h2>
+    <form id="uploadForm">
+      <input type="file" id="file" accept="image/png,image/jpeg" required />
+      <button class="btn" id="btnUpload" type="submit">Yükle &amp; Tara</button>
+      <span id="status" class="muted"></span>
+    </form>
+    <div id="result" style="display:none;margin-top:12px">
+      <h3>Sonuç</h3>
+      <p><strong>Metin:</strong></p>
+      <textarea id="ocrText" readonly></textarea>
+      <p><a id="blobLink" href="#" target="_blank">Kaydedilen görseli aç</a></p>
     </div>
-    <pre id="result" class="mono"></pre>
   </div>
 
   <div class="card">
-    <h3>Kayıtlı Belgeler</h3>
-    <button class="btn" id="refreshBtn">Yenile</button>
-    <div id="list"></div>
+    <h2>2) Kayıtlı Belgeler</h2>
+    <button class="btn" id="btnRefresh">Listeyi Yenile</button>
+    <div id="docs" class="grid" style="margin-top:12px"></div>
   </div>
 
 <script>
-const api = "";
+const API_BASE = location.origin;
 
-async function upload() {
-  const f = document.getElementById('file').files[0];
-  if (!f) { alert('Dosya seçiniz'); return; }
+const el = s => document.querySelector(s);
+const status = msg => el('#status').textContent = msg ?? '';
+
+async function uploadAndAnalyze(file){
   const fd = new FormData();
-  fd.append('file', f);
-  document.getElementById('result').textContent = 'Yükleniyor...';
-
-  const res = await fetch(`${api}/api/upload-and-analyze`, { method: 'POST', body: fd });
-  const data = await res.json();
-  document.getElementById('result').textContent = JSON.stringify(data, null, 2);
-  await loadDocs();
+  fd.append('file', file, file.name);
+  const res = await fetch(`${API_BASE}/api/upload-and-analyze`, { method:'POST', body:fd });
+  if(!res.ok) throw new Error(`Yükleme/OCR hata: ${res.status}`);
+  return res.json();
 }
 
-async function loadDocs() {
-  const res = await fetch(`${api}/api/documents`);
-  const rows = await res.json();
-  if (!Array.isArray(rows)) {
-    document.getElementById('list').innerHTML = '<p>Liste alınamadı.</p>';
+async function listDocuments(){
+  const res = await fetch(`${API_BASE}/api/documents`);
+  if(!res.ok) throw new Error('Belge listesi alınamadı');
+  return res.json();
+}
+
+el('#uploadForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const file = el('#file').files[0];
+  if(!file) return;
+  if(!/^image\/(png|jpeg)$/.test(file.type)){
+    alert('Sadece PNG veya JPEG yükleyin. (SVG linkleri geçersizdir)');
     return;
   }
-  const html = `
-    <table>
-      <thead><tr>
-        <th>Id</th><th>Ad</th><th>Tarih</th><th>Firma</th><th>OCR (ilk 120)</th><th>Blob</th>
-      </tr></thead>
-      <tbody>
-      ${rows.map(r => `
-        <tr>
-          <td>${r.Id ?? ''}</td>
-          <td>${r.Ad ?? ''}</td>
-          <td>${r.Tarih ?? ''}</td>
-          <td>${r.Firma ?? ''}</td>
-          <td title="${(r.OCR||'').replace(/"/g,'&quot;')}">${(r.OCR||'').slice(0,120)}</td>
-          <td>${r.BlobURL ? `<a href="${r.BlobURL}" target="_blank">gör</a>` : ''}</td>
-        </tr>
-      `).join('')}
-      </tbody>
-    </table>`;
-  document.getElementById('list').innerHTML = html;
-}
+  el('#btnUpload').disabled = true; status('Yükleniyor ve analiz ediliyor…');
+  try{
+    const data = await uploadAndAnalyze(file);
+    el('#result').style.display = 'block';
+    el('#ocrText').value = data.text || '(metin bulunamadı)';
+    el('#blobLink').href = data.blob_url || '#';
+    status('Bitti');
+  }catch(err){
+    console.error(err);
+    alert('Hata: ' + err.message);
+    status('');
+  }finally{
+    el('#btnUpload').disabled = false;
+  }
+});
 
-document.getElementById('uploadBtn').addEventListener('click', upload);
-document.getElementById('refreshBtn').addEventListener('click', loadDocs);
-loadDocs();
+async function refreshDocs(){
+  el('#btnRefresh').disabled = true;
+  const box = el('#docs'); box.innerHTML = '';
+  try{
+    const items = await listDocuments(); // [{url, text, created_at, ...}] varsayımı
+    (items || []).forEach(it=>{
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `
+        <a href="${it.url}" target="_blank"><img class="thumb" src="${it.url}" alt=""></a>
+        <p class="muted" style="margin:6px 0">${it.created_at || ''}</p>
+        <details><summary>Metin</summary><pre style="white-space:pre-wrap">${it.text || ''}</pre></details>
+      `;
+      box.appendChild(card);
+    });
+  }catch(err){
+    console.error(err); alert('Belge listesi alınamadı.');
+  }finally{
+    el('#btnRefresh').disabled = false;
+  }
+}
+el('#btnRefresh').addEventListener('click', refreshDocs);
+refreshDocs();
 </script>
 </body>
 </html>
