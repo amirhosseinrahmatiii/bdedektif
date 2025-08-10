@@ -8,3 +8,4 @@ azure-ai-vision-imageanalysis==1.0.0
 pydantic
 python-multipart
 azure-identity
+azure-ai-vision-imageanalysis==1.0.0
