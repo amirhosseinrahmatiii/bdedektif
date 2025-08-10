@@ -8,11 +8,12 @@ import inspect
 from io import BytesIO
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from azure.core.credentials import AzureKeyCredential
+from azure.core.exceptions import ResourceExistsError
 from azure.storage.blob import BlobServiceClient
 from azure.ai.vision.imageanalysis import ImageAnalysisClient
 from azure.ai.vision.imageanalysis.models import VisualFeatures
@@ -48,12 +49,15 @@ if os.path.isdir("static"):
 # -------------------------------------------------
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "time": datetime.datetime.utcnow().isoformat()}
+    return {"status": "ok", "time": datetime.datetime.utcnow().isoformat(), "app": "BelgeDedektif"}
 
-@app.get("/", response_class=FileResponse)
+@app.get("/")
 async def serve_frontend():
-    # static/index.html varsa bunu döndürür; yoksa 404 olur (app crash etmez)
-    return FileResponse("static/index.html")
+    index_path = "static/index.html"
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    # index yoksa sade bir JSON dön (uygulama çökmesin)
+    return JSONResponse({"message": "BelgeDedektif API çalışıyor", "docs": "/docs"}, status_code=200)
 
 
 # -------------------------------------------------
@@ -190,6 +194,13 @@ async def upload_and_analyze_document(file: UploadFile = File(...)):
     blob_service_client, container_name, vision_client = get_azure_clients()
 
     try:
+        # 0) Container varsa geç, yoksa oluştur (ilk çalıştırmada kolaylık)
+        try:
+            container_client = blob_service_client.get_container_client(container_name)
+            container_client.create_container()
+        except ResourceExistsError:
+            pass
+
         # 1) Blob'a yükle
         ext = os.path.splitext(file.filename)[1] or ".bin"
         blob_name = f"doc-{uuid.uuid4()}{ext}"
