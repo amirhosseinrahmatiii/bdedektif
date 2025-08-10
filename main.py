@@ -516,3 +516,35 @@ def delete_document(doc_id: str):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+import json
+
+# İstatistik endpoint'i
+@app.get("/api/stats")
+def get_stats():
+    """Belgeler hakkında istatistik döndürür."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT COUNT(*) FROM dbo.Belgeler")
+            total_docs = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM dbo.Belgeler WHERE Status='succeeded'")
+            success_count = cursor.fetchone()[0]
+
+            cursor.execute("SELECT MAX(Tarih) FROM dbo.Belgeler")
+            last_upload = cursor.fetchone()[0]
+            if isinstance(last_upload, (datetime.date, datetime.datetime)):
+                last_upload = last_upload.isoformat()
+
+        return {
+            "total_documents": total_docs,
+            "success_count": success_count,
+            "success_rate": f"{(success_count/total_docs*100):.2f}%" if total_docs else "0%",
+            "last_upload": last_upload
+        }
+
+    except Exception as e:
+        log.exception("Stats error")
+        raise HTTPException(status_code=500, detail=f"İstatistik alınırken hata: {str(e)}")
+
