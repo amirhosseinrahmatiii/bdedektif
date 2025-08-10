@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <title>BelgeDedektif - Yeni Arayüz</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/milligram/1.4.1/milligram.min.css">
+  <style>
+    body { margin: 20px; }
+    .dropzone { border: 2px dashed #ccc; padding: 20px; text-align: center; }
+    .progress { background: #eee; height: 20px; border-radius: 10px; overflow: hidden; margin-top: 10px; }
+    .progress-bar { background: #33c3f0; height: 100%; width: 0; transition: width 0.3s; }
+  </style>
+</head>
+<body>
+  <h1>BelgeDedektif - Yeni Yükleme</h1>
+  
+  <div class="dropzone" id="dropzone">
+    Dosyaları buraya bırakın veya <input type="file" id="fileInput" multiple>
+  </div>
+  
+  <div class="progress">
+    <div class="progress-bar" id="progressBar"></div>
+  </div>
+
+  <pre id="status"></pre>
+
+  <script src="js/new_app.js"></script>
+</body>
+</html>
